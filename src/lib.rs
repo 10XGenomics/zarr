@@ -13,21 +13,13 @@ use std::io::Error;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use serde::{
-    Deserialize,
-    Serialize,
-};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use smallvec::SmallVec;
 use thiserror::Error;
 
 use crate::chunk::{
-    DataChunk,
-    ReadableDataChunk,
-    ReinitDataChunk,
-    SliceDataChunk,
-    VecDataChunk,
-    WriteableDataChunk,
+    DataChunk, ReadableDataChunk, ReinitDataChunk, SliceDataChunk, VecDataChunk, WriteableDataChunk,
 };
 
 pub mod chunk;
@@ -45,10 +37,7 @@ pub mod store;
 #[macro_use]
 pub(crate) mod tests;
 
-pub use semver::{
-    Version,
-    VersionReq,
-};
+pub use semver::{Version, VersionReq};
 
 const COORD_SMALLVEC_SIZE: usize = 6;
 pub type CoordVec<T> = SmallVec<[T; COORD_SMALLVEC_SIZE]>;
@@ -65,7 +54,7 @@ pub const VERSION: Version = Version {
 };
 
 // TODO: from https://users.rust-lang.org/t/append-an-additional-extension/23586/12
-fn add_extension(path: &mut std::path::PathBuf, extension: impl AsRef<std::path::Path>) {
+fn add_extension(path: &mut PathBuf, extension: impl AsRef<std::path::Path>) {
     match path.extension() {
         Some(ext) => {
             let mut ext = ext.to_os_string();
@@ -85,18 +74,18 @@ const GROUP_METADATA_KEY_EXT: &str = "group";
 
 // Work around lack of Rust enum variant types (#2593) for `Value::Object(..)`
 // to still provide guarantee of correct type for attributes.
-type JsonObject = serde_json::Map<String, serde_json::Value>;
+type JsonObject = serde_json::Map<String, Value>;
 
 #[derive(Error, Debug)]
 pub enum MetadataError {
     #[error("value was not of the expected type: {0}")]
-    UnexpectedType(serde_json::Value),
+    UnexpectedType(Value),
     #[error("Encountered an unknown extension that must be understood: {}", .0.extension)]
     UnknownRequiredExtension(ExtensionMetadata),
 }
 
-impl From<MetadataError> for std::io::Error {
-    fn from(e: MetadataError) -> std::io::Error {
+impl From<MetadataError> for Error {
+    fn from(e: MetadataError) -> Self {
         use std::io::ErrorKind;
         use MetadataError::*;
 
@@ -344,7 +333,7 @@ fn u64_ceil_div(a: u64, b: u64) -> u64 {
 /// Metadata for groups.
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct GroupMetadata {
-    extensions: Vec<serde_json::Value>,
+    extensions: Vec<Value>,
     attributes: JsonObject,
 }
 

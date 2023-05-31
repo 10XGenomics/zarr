@@ -1,14 +1,8 @@
 //! Compression for chunk voxel data.
 
-use std::io::{
-    Read,
-    Write,
-};
+use std::io::{Read, Write};
 
-use serde::{
-    Deserialize,
-    Serialize,
-};
+use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "blosc")]
 pub mod blosc;
@@ -57,7 +51,7 @@ pub enum CompressionType {
 impl CompressionType {
     pub fn new<T: Compression>() -> CompressionType
     where
-        CompressionType: std::convert::From<T>,
+        CompressionType: From<T>,
     {
         T::default().into()
     }
@@ -170,7 +164,7 @@ impl std::str::FromStr for CompressionType {
 
 macro_rules! compression_from_impl {
     ($variant:ident, $c_type:ty) => {
-        impl std::convert::From<$c_type> for CompressionType {
+        impl From<$c_type> for CompressionType {
             fn from(c: $c_type) -> Self {
                 CompressionType::$variant(c)
             }

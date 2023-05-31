@@ -1,33 +1,13 @@
-use std::io::{
-    Error,
-    ErrorKind,
-    Read,
-    Write,
-};
+use std::io::{Error, ErrorKind, Read, Write};
 
 use semver::VersionReq;
 use serde_json::Value;
 
 use crate::{
     canonicalize_path,
-    chunk::{
-        DataChunk,
-        ReadableDataChunk,
-        ReinitDataChunk,
-        VecDataChunk,
-        WriteableDataChunk,
-    },
-    ArrayMetadata,
-    GridCoord,
-    GroupMetadata,
-    Hierarchy,
-    HierarchyLister,
-    HierarchyReader,
-    HierarchyWriter,
-    JsonObject,
-    MetadataError,
-    ReflectedType,
-    StoreNodeMetadata,
+    chunk::{DataChunk, ReadableDataChunk, ReinitDataChunk, VecDataChunk, WriteableDataChunk},
+    ArrayMetadata, GridCoord, GroupMetadata, Hierarchy, HierarchyLister, HierarchyReader,
+    HierarchyWriter, JsonObject, MetadataError, ReflectedType, StoreNodeMetadata,
 };
 
 pub trait ReadableStore {
@@ -268,9 +248,9 @@ impl<S: ReadableStore + Hierarchy> HierarchyReader for S {
 
     fn store_chunk_metadata(
         &self,
-        path_name: &str,
-        array_meta: &ArrayMetadata,
-        grid_position: &[u64],
+        _path_name: &str,
+        _array_meta: &ArrayMetadata,
+        _grid_position: &[u64],
     ) -> Result<Option<StoreNodeMetadata>, Error> {
         todo!()
     }
@@ -293,7 +273,7 @@ impl<S: ReadableStore + Hierarchy> HierarchyReader for S {
         // For now return an error.
         let value_reader = ReadableStore::get(self, &metadata_key.to_str().expect("TODO"))?
             .ok_or_else(|| Error::from(ErrorKind::NotFound))?;
-        let mut value: serde_json::Value = serde_json::from_reader(value_reader)?;
+        let mut value: Value = serde_json::from_reader(value_reader)?;
         let attrs = match value
             .as_object_mut()
             .and_then(|o| o.remove(ATTRIBUTES_NAME))
@@ -313,7 +293,7 @@ impl<S: ListableStore + Hierarchy> HierarchyLister for S {
         let key_prefix = format!(
             "{}/{}",
             crate::META_ROOT_PATH,
-            crate::canonicalize_path(prefix_path)
+            canonicalize_path(prefix_path)
         );
         let (mut keys, mut prefixes) = self.list_dir(&key_prefix)?;
 

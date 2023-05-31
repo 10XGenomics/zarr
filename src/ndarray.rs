@@ -1,41 +1,17 @@
-use std::io::{
-    Error,
-    ErrorKind,
-};
+use std::io::{Error, ErrorKind};
 use std::ops::Sub;
 
 use itertools::Itertools;
-use ndarray::{
-    Array,
-    ArrayView,
-    IxDyn,
-    ShapeBuilder,
-    SliceInfo,
-};
+use ndarray::{Array, ArrayView, Dim, IxDyn, IxDynImpl, ShapeBuilder, SliceInfo};
 
 use crate::{
-    ArrayMetadata,
-    ChunkCoord,
-    CoordVec,
-    DataChunk,
-    GridCoord,
-    HierarchyReader,
-    HierarchyWriter,
-    Order,
-    ReadableDataChunk,
-    ReflectedType,
-    ReinitDataChunk,
-    SliceDataChunk,
-    VecDataChunk,
+    ArrayMetadata, ChunkCoord, CoordVec, DataChunk, GridCoord, HierarchyReader, HierarchyWriter,
+    Order, ReadableDataChunk, ReflectedType, ReinitDataChunk, SliceDataChunk, VecDataChunk,
     WriteableDataChunk,
 };
 
 pub mod prelude {
-    pub use super::{
-        BoundingBox,
-        ZarrNdarrayReader,
-        ZarrNdarrayWriter,
-    };
+    pub use super::{BoundingBox, ZarrNdarrayReader, ZarrNdarrayWriter};
 }
 
 /// Specifes the extents of an axis-aligned bounding box.
@@ -156,7 +132,7 @@ pub trait ZarrNdarrayReader: HierarchyReader {
         path_name: &str,
         array_meta: &ArrayMetadata,
         bbox: &BoundingBox,
-    ) -> Result<ndarray::Array<T, ndarray::Dim<ndarray::IxDynImpl>>, Error>
+    ) -> Result<Array<T, Dim<IxDynImpl>>, Error>
     where
         VecDataChunk<T>: DataChunk<T> + ReinitDataChunk<T> + ReadableDataChunk,
         T: ReflectedType,
@@ -180,7 +156,7 @@ pub trait ZarrNdarrayReader: HierarchyReader {
         path_name: &str,
         array_meta: &ArrayMetadata,
         bbox: &BoundingBox,
-        arr: ndarray::ArrayViewMut<'a, T, ndarray::Dim<ndarray::IxDynImpl>>,
+        arr: ndarray::ArrayViewMut<'a, T, Dim<IxDynImpl>>,
     ) -> Result<(), Error>
     where
         VecDataChunk<T>: DataChunk<T> + ReinitDataChunk<T> + ReadableDataChunk,
@@ -197,7 +173,7 @@ pub trait ZarrNdarrayReader: HierarchyReader {
         path_name: &str,
         array_meta: &ArrayMetadata,
         bbox: &BoundingBox,
-        mut arr: ndarray::ArrayViewMut<'a, T, ndarray::Dim<ndarray::IxDynImpl>>,
+        mut arr: ndarray::ArrayViewMut<'a, T, Dim<IxDynImpl>>,
         chunk_buff_opt: &mut Option<VecDataChunk<T>>,
     ) -> Result<(), Error>
     where
@@ -284,7 +260,7 @@ pub trait ZarrNdarrayWriter: HierarchyWriter {
     where
         VecDataChunk<T>: DataChunk<T> + ReadableDataChunk + WriteableDataChunk,
         T: ReflectedType,
-        A: ndarray::AsArray<'a, T, ndarray::Dim<ndarray::IxDynImpl>>,
+        A: ndarray::AsArray<'a, T, Dim<IxDynImpl>>,
     {
         let array = array.into();
         if array.ndim() != array_meta.get_ndim() {
@@ -303,7 +279,7 @@ pub trait ZarrNdarrayWriter: HierarchyWriter {
         let mut existing_chunk_vec: Vec<T> = Vec::new();
 
         let extend_from_array =
-            |v: &mut Vec<T>, view: ArrayView<T, IxDyn>, array_meta: &ArrayMetadata| {
+            |v: &mut Vec<T>, view: ArrayView<'_, T, IxDyn>, array_meta: &ArrayMetadata| {
                 match array_meta.chunk_memory_layout {
                     Order::RowMajor => match view.as_slice() {
                         Some(s) => v.extend_from_slice(s),
@@ -450,10 +426,7 @@ impl<T: ReflectedType, C: AsRef<[T]>> SliceDataChunk<T, C> {
         array_meta.get_chunk_bounds(self.get_grid_position())
     }
 
-    fn shape_ndarray_shape(
-        &self,
-        array_meta: &ArrayMetadata,
-    ) -> ndarray::Shape<ndarray::Dim<ndarray::IxDynImpl>> {
+    fn shape_ndarray_shape(&self, array_meta: &ArrayMetadata) -> ndarray::Shape<Dim<IxDynImpl>> {
         let chunk_bb = self.get_bounds(array_meta);
         match array_meta.get_chunk_memory_layout() {
             Order::ColumnMajor => chunk_bb.shape_ndarray_shape().f(),
@@ -461,20 +434,14 @@ impl<T: ReflectedType, C: AsRef<[T]>> SliceDataChunk<T, C> {
         }
     }
 
-    pub fn as_ndarray(
-        &self,
-        array_meta: &ArrayMetadata,
-    ) -> ArrayView<T, ndarray::Dim<ndarray::IxDynImpl>> {
+    pub fn as_ndarray(&self, array_meta: &ArrayMetadata) -> ArrayView<'_, T, Dim<IxDynImpl>> {
         let chunk_shape = self.shape_ndarray_shape(array_meta);
         ArrayView::from_shape(chunk_shape, self.get_data()).expect("TODO: chunk ndarray failed")
     }
 }
 
 impl<T: ReflectedType> VecDataChunk<T> {
-    pub fn into_ndarray(
-        self,
-        array_meta: &ArrayMetadata,
-    ) -> Array<T, ndarray::Dim<ndarray::IxDynImpl>> {
+    pub fn into_ndarray(self, array_meta: &ArrayMetadata) -> Array<T, Dim<IxDynImpl>> {
         let chunk_shape = self.shape_ndarray_shape(array_meta);
         Array::from_shape_vec(chunk_shape, self.into_data()).expect("TODO: chunk ndarray failed")
     }

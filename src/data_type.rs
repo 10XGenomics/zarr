@@ -1,16 +1,9 @@
 use std::io::Write;
 
 use half::f16;
-use serde::{
-    Deserialize,
-    Serialize,
-};
+use serde::{Deserialize, Serialize};
 
-use crate::{
-    GridCoord,
-    MetadataError,
-    VecDataChunk,
-};
+use crate::{GridCoord, MetadataError, VecDataChunk};
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum IntSize {
@@ -169,7 +162,7 @@ struct DataTypeVisitor;
 impl<'de> serde::de::Visitor<'de> for DataTypeVisitor {
     type Value = DataType;
 
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("a string of the format `bool|[<>]?[iuf][1248]`")
     }
 

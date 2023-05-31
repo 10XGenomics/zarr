@@ -1,4 +1,4 @@
-extern crate blosc_src;
+use blosc_src;
 
 /*
 Portions of the blosc decompression code originate from blosc-rs
@@ -36,7 +36,7 @@ DEALINGS IN THE SOFTWARE.
 */
 
 use std::io::{Cursor, Read, Write};
-use std::{error, fmt, mem, os::raw::c_void, ptr};
+use std::{error, fmt, mem, os::raw::c_void};
 
 use serde::{Deserialize, Serialize};
 
@@ -45,8 +45,11 @@ use blosc_src::*;
 use super::Compression;
 
 const COMPRESSOR_BLOSCLZ: &str = "blosclz";
+#[allow(dead_code)]
 const COMPRESSOR_LZ4: &str = "lz4";
+#[allow(dead_code)]
 const COMPRESSOR_ZLIB: &str = "zlib";
+#[allow(dead_code)]
 const COMPRESSOR_ZSTD: &str = "zstd";
 
 /// An unspecified error from C-Blosc
@@ -114,6 +117,7 @@ impl BloscCompression {
         let mut _blocksize: usize = 0;
 
         // unsafe
+        #[allow(trivial_casts)]
         blosc_cbuffer_sizes(
             src.as_ptr() as *const c_void,
             &mut nbytes as *mut usize,
@@ -145,7 +149,7 @@ impl Compression for BloscCompression {
     fn decoder<'a, R: Read + 'a>(&self, mut r: R) -> Box<dyn Read + 'a> {
         // blosc is all at the same time...
         let mut bytes: Vec<u8> = Vec::new();
-        r.read_to_end(&mut bytes);
+        r.read_to_end(&mut bytes).unwrap();
         let decompressed = BloscCompression::decompress(&bytes).unwrap();
         Box::new(Cursor::new(decompressed))
     }
