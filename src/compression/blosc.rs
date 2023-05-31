@@ -75,6 +75,12 @@ pub struct BloscCompression {
     cname: String,
     #[serde(default = "default_blosc_shufflemode")]
     shuffle: u8, // serialize shuffle mode into enum by index
+    #[serde(default = "default_blosc_id")]
+    id: String,
+}
+
+fn default_blosc_id() -> String {
+    "blosc".to_string()
 }
 
 fn default_blosc_blocksize() -> usize {
@@ -96,6 +102,7 @@ impl Default for BloscCompression {
             clevel: 5,
             cname: String::from(COMPRESSOR_BLOSCLZ),
             shuffle: default_blosc_shufflemode(),
+            id: default_blosc_id(),
         }
     }
 }

@@ -1,27 +1,11 @@
-use std::io::{
-    Error,
-    ErrorKind,
-    Read,
-    Result,
-    Write,
-};
+use std::io::{Error, ErrorKind, Read, Result, Write};
 use std::marker::PhantomData;
 
-use byteorder::{
-    BigEndian,
-    ByteOrder,
-    LittleEndian,
-    ReadBytesExt,
-};
+use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
 use half::f16;
 
 use crate::compression::Compression;
-use crate::{
-    data_type::Endian,
-    ArrayMetadata,
-    GridCoord,
-    ReflectedType,
-};
+use crate::{data_type::Endian, ArrayMetadata, GridCoord, ReflectedType};
 
 /// Traits for data chunks that can be reused as a different chunks after
 /// construction.
@@ -111,6 +95,7 @@ macro_rules! vec_data_chunk_impl {
                 match array_meta.data_type.effective_type()?.endian() {
                     Endian::Big => source.$bo_read_fn::<BigEndian>(self.data.as_mut()),
                     Endian::Little => source.$bo_read_fn::<LittleEndian>(self.data.as_mut()),
+                    Endian::NotRelevant => panic!("Must specify endianness for byte sized data"),
                 }
             }
         }
@@ -131,6 +116,9 @@ macro_rules! vec_data_chunk_impl {
                     match endian {
                         Endian::Big => BigEndian::$bo_write_fn(c, &mut buf[..byte_len]),
                         Endian::Little => LittleEndian::$bo_write_fn(c, &mut buf[..byte_len]),
+                        Endian::NotRelevant => {
+                            panic!("Must specify endianness for byte sized data")
+                        }
                     }
                     target.write_all(&buf[..byte_len])?;
                 }
@@ -215,6 +203,7 @@ impl<C: AsMut<[f16]>> ReadableDataChunk for SliceDataChunk<f16, C> {
             *n = match endian {
                 Endian::Big => f16::from_be_bytes(bytes),
                 Endian::Little => f16::from_le_bytes(bytes),
+                Endian::NotRelevant => panic!("invalid byte order for f16 dtype"),
             };
         }
         Ok(())
@@ -229,6 +218,7 @@ impl<C: AsRef<[f16]>> WriteableDataChunk for SliceDataChunk<f16, C> {
             let bytes = match endian {
                 Endian::Big => n.to_be_bytes(),
                 Endian::Little => n.to_le_bytes(),
+                Endian::NotRelevant => panic!("invalid byte order for f16 dtype"),
             };
             target.write_all(&bytes[..])?;
         }

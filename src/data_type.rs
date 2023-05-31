@@ -6,6 +6,28 @@ use serde::{Deserialize, Serialize};
 use crate::{GridCoord, MetadataError, VecDataChunk};
 
 #[derive(PartialEq, Debug, Clone, Copy)]
+pub enum BoolSize {
+    B1,
+}
+
+impl BoolSize {
+    fn deserial_char(c: char) -> Option<Self> {
+        use BoolSize::*;
+        match c {
+            '1' => Some(B1),
+            _ => None,
+        }
+    }
+
+    fn serial_char(&self) -> char {
+        use BoolSize::*;
+        match self {
+            B1 => '1',
+        }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum IntSize {
     B1,
     B2,
@@ -68,6 +90,7 @@ impl FloatSize {
 pub enum Endian {
     Big,
     Little,
+    NotRelevant,
 }
 
 #[cfg(target_endian = "big")]
@@ -81,6 +104,7 @@ impl Endian {
         match c {
             '>' => Some(Endian::Big),
             '<' => Some(Endian::Little),
+            '|' => Some(Endian::NotRelevant),
             _ => None,
         }
     }
@@ -89,6 +113,7 @@ impl Endian {
         match self {
             Endian::Big => '>',
             Endian::Little => '<',
+            Endian::NotRelevant => '|',
         }
     }
 }
@@ -108,7 +133,7 @@ impl Endian {
 /// ```
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum DataType {
-    Bool,
+    Bool { size: BoolSize, endian: Endian },
     Int { size: IntSize, endian: Endian },
     UInt { size: IntSize, endian: Endian },
     Float { size: FloatSize, endian: Endian },
@@ -123,7 +148,12 @@ impl Serialize for DataType {
         use DataType::*;
         let mut buf = [0u8; 32];
         let s = match self {
-            Bool => "bool",
+            Bool { size, endian } => {
+                endian.serial_char().encode_utf8(&mut buf[0..1]);
+                'b'.encode_utf8(&mut buf[1..2]);
+                size.serial_char().encode_utf8(&mut buf[2..3]);
+                std::str::from_utf8(&buf[..3]).unwrap()
+            }
             Int {
                 size: IntSize::B1, ..
             } => "i1",
@@ -163,7 +193,7 @@ impl<'de> serde::de::Visitor<'de> for DataTypeVisitor {
     type Value = DataType;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("a string of the format `bool|[<>]?[iuf][1248]`")
+        formatter.write_str("a string of the format `bool|[<>|]?[iuf][1248]`")
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
@@ -171,7 +201,10 @@ impl<'de> serde::de::Visitor<'de> for DataTypeVisitor {
         E: serde::de::Error,
     {
         let dtype = match value {
-            "bool" => DataType::Bool,
+            "b1" => DataType::Bool {
+                size: BoolSize::B1,
+                endian: Endian::NotRelevant,
+            },
             "i1" => DataType::Int {
                 size: IntSize::B1,
                 endian: Endian::Little,
@@ -213,6 +246,10 @@ impl<'de> serde::de::Visitor<'de> for DataTypeVisitor {
                     'f' => {
                         let size = FloatSize::deserial_char(chars.next().unwrap()).unwrap();
                         DataType::Float { size, endian }
+                    }
+                    'b' => {
+                        let size = BoolSize::deserial_char(chars.next().unwrap()).unwrap();
+                        DataType::Bool { size, endian }
                     }
                     _ => {
                         return Err(serde::de::Error::invalid_value(
@@ -370,7 +407,7 @@ macro_rules! data_type_match {
     ($match_expr:expr, $raw_match:pat => $raw_expr:expr, $($expr:tt)*) => {
         {
             match $match_expr {
-                $crate::DataType::Bool => $crate::data_type_rstype_replace!(bool, $($expr)*),
+                $crate::DataType::Bool { .. } => $crate::data_type_rstype_replace!(bool, $($expr)*),
                 $crate::DataType::UInt {size: IntSize::B1, ..} => $crate::data_type_rstype_replace!(u8, $($expr)*),
                 $crate::DataType::UInt {size: IntSize::B2, ..}=> $crate::data_type_rstype_replace!(u16, $($expr)*),
                 $crate::DataType::UInt {size: IntSize::B4, ..} => $crate::data_type_rstype_replace!(u32, $($expr)*),
@@ -389,7 +426,7 @@ macro_rules! data_type_match {
     ($match_expr:expr, $($expr:tt)*) => {
         {
             match $match_expr {
-                $crate::DataType::Bool => $crate::data_type_rstype_replace!(bool, $($expr)*),
+                $crate::DataType::Bool { .. } => $crate::data_type_rstype_replace!(bool, $($expr)*),
                 $crate::DataType::UInt {size: IntSize::B1, ..} => $crate::data_type_rstype_replace!(u8, $($expr)*),
                 $crate::DataType::UInt {size: IntSize::B2, ..}=> $crate::data_type_rstype_replace!(u16, $($expr)*),
                 $crate::DataType::UInt {size: IntSize::B4, ..} => $crate::data_type_rstype_replace!(u32, $($expr)*),
@@ -426,7 +463,7 @@ impl DataType {
 
     pub(crate) fn eq_modulo_endian(&self, other: &Self) -> bool {
         match (self, other) {
-            (DataType::Bool, DataType::Bool) => true,
+            (DataType::Bool { size: s1, .. }, DataType::Bool { size: s2, .. }) => s1 == s2,
             (DataType::Int { size: s1, .. }, DataType::Int { size: s2, .. }) => s1 == s2,
             (DataType::UInt { size: s1, .. }, DataType::UInt { size: s2, .. }) => s1 == s2,
             (DataType::Float { size: s1, .. }, DataType::Float { size: s2, .. }) => s1 == s2,
@@ -469,7 +506,7 @@ macro_rules! reflected_type {
     };
 }
 
-#[rustfmt::skip] reflected_type!(DataType::Bool, bool);
+#[rustfmt::skip] reflected_type!(DataType::Bool {size: BoolSize::B1, endian: Endian::NotRelevant}, bool);
 #[rustfmt::skip] reflected_type!(DataType::UInt {size: IntSize::B1, endian: NATIVE_ENDIAN}, u8);
 #[rustfmt::skip] reflected_type!(DataType::UInt {size: IntSize::B2, endian: NATIVE_ENDIAN}, u16);
 #[rustfmt::skip] reflected_type!(DataType::UInt {size: IntSize::B4, endian: NATIVE_ENDIAN}, u32);
