@@ -326,10 +326,6 @@ pub trait HierarchyWriter: HierarchyReader {
     ) -> Result<bool, Error>;
 }
 
-fn u64_ceil_div(a: u64, b: u64) -> u64 {
-    (a + 1) / b + (if a % b != 0 { 1 } else { 0 })
-}
-
 /// Metadata for groups.
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct GroupMetadata {
@@ -470,10 +466,10 @@ impl ArrayMetadata {
 
     /// Get the upper bound extent of grid coordinates.
     pub fn get_grid_extent(&self) -> GridCoord {
-        self.shape
+        self.get_shape()
             .iter()
-            .zip(self.chunk_grid.chunk_shape.iter().cloned().map(u64::from))
-            .map(|(d, b)| u64_ceil_div(*d, b))
+            .zip(self.get_chunk_shape().iter())
+            .map(|(&d, &s)| (d + u64::from(s) - 1) / u64::from(s))
             .collect()
     }
 

@@ -365,13 +365,7 @@ impl<T: HierarchyWriter> ZarrNdarrayWriter for T {}
 
 impl ArrayMetadata {
     pub fn coord_iter(&self) -> impl Iterator<Item = Vec<u64>> + ExactSizeIterator {
-        let coord_ceil = self
-            .get_shape()
-            .iter()
-            .zip(self.get_chunk_shape().iter())
-            .map(|(&d, &s)| (d + u64::from(s) - 1) / u64::from(s))
-            .collect::<GridCoord>();
-
+        let coord_ceil = self.get_grid_extent();
         CoordIterator::new(&coord_ceil)
     }
 
