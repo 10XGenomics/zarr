@@ -37,7 +37,7 @@ pub mod store;
 #[macro_use]
 pub(crate) mod tests;
 
-pub use semver::{Version, VersionReq};
+pub use semver::{Version, VersionReq, Prerelease, BuildMetadata};
 
 const COORD_SMALLVEC_SIZE: usize = 6;
 pub type CoordVec<T> = SmallVec<[T; COORD_SMALLVEC_SIZE]>;
@@ -49,8 +49,8 @@ pub const VERSION: Version = Version {
     major: 3,
     minor: 0,
     patch: 0,
-    pre: Vec::new(),
-    build: Vec::new(),
+    pre: Prerelease::EMPTY,
+    build: BuildMetadata::EMPTY,
 };
 
 // TODO: from https://users.rust-lang.org/t/append-an-additional-extension/23586/12

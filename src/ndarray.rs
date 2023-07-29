@@ -91,11 +91,11 @@ impl BoundingBox {
             .map(|(o, s)| o + s)
     }
 
-    pub fn to_ndarray_slice(&self) -> CoordVec<ndarray::SliceOrIndex> {
+    pub fn to_ndarray_slice(&self) -> CoordVec<ndarray::SliceInfoElem> {
         self.offset
             .iter()
             .zip(self.end())
-            .map(|(&start, end)| ndarray::SliceOrIndex::Slice {
+            .map(|(&start, end)| ndarray::SliceInfoElem::Slice {
                 start: start as isize,
                 end: Some(end as isize),
                 step: 1,
@@ -227,14 +227,17 @@ pub trait ZarrNdarrayReader: HierarchyReader {
                 let chunk_read_bb = read_bb.clone() - &chunk_bb.offset;
 
                 let arr_slice = arr_read_bb.to_ndarray_slice();
-                let mut arr_view =
-                    arr.slice_mut(SliceInfo::<_, IxDyn>::new(arr_slice).unwrap().as_ref());
+                
+                let mut arr_view = unsafe {
+                    arr.slice_mut(SliceInfo::<_, IxDyn, IxDyn>::new(arr_slice).unwrap().as_ref())
+                };
 
                 let chunk_slice = chunk_read_bb.to_ndarray_slice();
 
                 let chunk_data = chunk.as_ndarray(array_meta);
-                let chunk_view =
-                    chunk_data.slice(SliceInfo::<_, IxDyn>::new(chunk_slice).unwrap().as_ref());
+                let chunk_view = unsafe {
+                    chunk_data.slice(SliceInfo::<_, IxDyn, IxDyn>::new(chunk_slice).unwrap().as_ref())
+                };
 
                 arr_view.assign(&chunk_view);
             }
@@ -298,7 +301,7 @@ pub trait ZarrNdarrayWriter: HierarchyWriter {
             let arr_bb = write_bb.clone() - &bbox.offset;
 
             let arr_slice = arr_bb.to_ndarray_slice();
-            let arr_view = array.slice(SliceInfo::<_, IxDyn>::new(arr_slice).unwrap().as_ref());
+            let arr_view = unsafe {array.slice(SliceInfo::<_, IxDyn, IxDyn>::new(arr_slice).unwrap().as_ref())};
 
             if write_bb == nom_chunk_bb {
                 // No need to read whether there is an extant chunk if it is
@@ -342,8 +345,8 @@ pub trait ZarrNdarrayWriter: HierarchyWriter {
 
                 let chunk_write_bb = write_bb.clone() - &chunk_bb.offset;
                 let chunk_slice = chunk_write_bb.to_ndarray_slice();
-                let mut chunk_view = chunk_array
-                    .slice_mut(SliceInfo::<_, IxDyn>::new(chunk_slice).unwrap().as_ref());
+                let mut chunk_view = unsafe { chunk_array
+                    .slice_mut(SliceInfo::<_, IxDyn, IxDyn>::new(chunk_slice).unwrap().as_ref()) };
 
                 chunk_view.assign(&arr_view);
 
