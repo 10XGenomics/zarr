@@ -36,7 +36,7 @@ DEALINGS IN THE SOFTWARE.
 */
 
 use std::io::{Cursor, Read, Write};
-use std::{error, fmt, mem, os::raw::c_void};
+use std::{error, fmt, mem, os::raw::{c_void, c_char, c_int}};
 
 use serde::{Deserialize, Serialize};
 
@@ -44,6 +44,7 @@ use blosc_src::*;
 
 use super::Compression;
 
+const BLOSC_BLOSCLZ_COMPNAME: &[u8; 8usize] = b"blosclz\0";
 const COMPRESSOR_BLOSCLZ: &str = "blosclz";
 #[allow(dead_code)]
 const COMPRESSOR_LZ4: &str = "lz4";
@@ -149,6 +150,46 @@ impl BloscCompression {
         } else {
             Err(BloscError)
         }
+    }
+
+    // Adapted from https://github.com/asomers/blosc-rs
+    /// Compress an array and return a newly allocated compressed buffer.
+    fn compress<T>(&self, src: &[T]) -> Vec<u8> {
+        let typesize = mem::size_of::<T>();
+        let src_size = mem::size_of_val(src);
+        let dest_size = src_size + BLOSC_MAX_OVERHEAD as usize;
+        let mut dest: Vec<u8> = Vec::with_capacity(dest_size);
+        let rsize = unsafe {
+            blosc_compress_ctx(
+                self.clevel as c_int,
+                self.shuffle as c_int,
+                typesize,
+                src_size,
+                src.as_ptr() as *const c_void,
+                dest.as_mut_ptr() as *mut c_void,
+                dest_size,
+                BLOSC_BLOSCLZ_COMPNAME.as_ptr() as *const c_char,
+                self.blocksize,
+                1,
+            )
+        };
+        // Blosc's docs claim that blosc_compress_ctx should never return an
+        // error
+        // LCOV_EXCL_START
+        assert!(
+            rsize >= 0,
+            "C-Blosc internal error with Context={:?}, typesize={:?} nbytes={:?} and destsize={:?}",
+            self,
+            typesize,
+            src_size,
+            dest_size
+        );
+        // LCOV_EXCL_STOP
+        unsafe {
+            dest.set_len(rsize as usize);
+        }
+        dest.shrink_to_fit();
+        dest 
     }
 }
 

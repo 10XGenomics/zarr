@@ -145,6 +145,9 @@ impl std::str::FromStr for CompressionType {
         match s.to_ascii_lowercase().as_str() {
             "raw" => Ok(Self::new::<raw::RawCompression>()),
 
+            #[cfg(feature = "blosc")]
+            "blosc" => Ok(Self::new::<blosc::BloscCompression>()),
+
             #[cfg(feature = "bzip")]
             "bzip2" => Ok(Self::new::<bzip::Bzip2Compression>()),
 
@@ -173,6 +176,8 @@ macro_rules! compression_from_impl {
 }
 
 compression_from_impl!(Raw, raw::RawCompression);
+#[cfg(feature = "blosc")]
+compression_from_impl!(Blosc, blosc::BloscCompression);
 #[cfg(feature = "bzip")]
 compression_from_impl!(Bzip2, bzip::Bzip2Compression);
 #[cfg(any(feature = "gzip", feature = "gzip_pure"))]

@@ -1,7 +1,6 @@
 //! TODO.
 
 #![deny(missing_debug_implementations)]
-#![cfg_attr(not(feature = "blosc"), forbid(unsafe_code))]
 
 #[cfg(all(doctest, feature = "filesystem"))]
 doc_comment::doctest!("../README.md");
@@ -37,7 +36,7 @@ pub mod store;
 #[macro_use]
 pub(crate) mod tests;
 
-pub use semver::{Version, VersionReq, Prerelease, BuildMetadata};
+pub use semver::{BuildMetadata, Prerelease, Version, VersionReq};
 
 const COORD_SMALLVEC_SIZE: usize = 6;
 pub type CoordVec<T> = SmallVec<[T; COORD_SMALLVEC_SIZE]>;
