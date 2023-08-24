@@ -35,8 +35,11 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 */
 
-use std::io::{Cursor, Read, Write};
-use std::{error, fmt, mem, os::raw::{c_void, c_char, c_int}};
+use std::io::{Cursor, Read, Result as IoResult, Write};
+use std::{
+    error, fmt, mem,
+    os::raw::{c_char, c_int, c_void},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -189,7 +192,42 @@ impl BloscCompression {
             dest.set_len(rsize as usize);
         }
         dest.shrink_to_fit();
-        dest 
+        dest
+    }
+}
+
+struct Wrapper<W: Write> {
+    writer: W,
+    compressor: BloscCompression,
+    inner_buffer: Vec<u8>,
+    finished: bool,
+}
+
+impl<W: Write> Write for Wrapper<W> {
+    fn write(&mut self, buffer: &[u8]) -> IoResult<usize> {
+        self.inner_buffer.extend(buffer);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        Ok(())
+    }
+}
+
+impl<W: Write> Wrapper<W> {
+    fn finish(&mut self) -> IoResult<()> {
+        if self.finished {
+            return Ok(());
+        }
+        self.finished = true;
+        let compressed_bytes = self.compressor.compress(&self.inner_buffer);
+        self.writer.write_all(&compressed_bytes)
+    }
+}
+
+impl<W: Write> Drop for Wrapper<W> {
+    fn drop(&mut self) {
+        self.finish().unwrap();
     }
 }
 
@@ -202,12 +240,13 @@ impl Compression for BloscCompression {
         Box::new(Cursor::new(decompressed))
     }
 
-    // TODO not currently supported
     fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn Write + 'a> {
-        // TODO: need wrapper that only does the compression when
-        // the end of the data/EOF is reached.
-        Box::new(w)
-        // TODO adapt members to compress() method, write compress method
+        Box::new(Wrapper {
+            writer: w,
+            compressor: self.clone(),
+            inner_buffer: Vec::new(),
+            finished: false,
+        })
     }
 }
 
@@ -234,10 +273,26 @@ mod tests {
             clevel: 5,
             cname: COMPRESSOR_LZ4.to_string(),
             shuffle: 1,
+            id: "blosc".to_string(),
         };
         crate::tests::test_read_doc_spec_chunk(
             TEST_CHUNK_I16_BLOSC.as_ref(),
             CompressionType::Blosc(blosc_lz4),
         );
+    }
+
+    #[test]
+    fn test_write_doc_spec_chunk() {
+        let blosc_lz4: BloscCompression = BloscCompression {
+            blocksize: 0,
+            clevel: 5,
+            cname: COMPRESSOR_LZ4.to_string(),
+            shuffle: 1,
+            id: "blosc".to_string(),
+        };
+        crate::tests::test_write_doc_spec_chunk(
+            TEST_CHUNK_I16_BLOSC.as_ref(),
+            CompressionType::Blosc(blosc_lz4),
+        )
     }
 }
