@@ -47,14 +47,38 @@ use blosc_src::*;
 
 use super::Compression;
 
-const BLOSC_BLOSCLZ_COMPNAME: &[u8; 8usize] = b"blosclz\0";
-const COMPRESSOR_BLOSCLZ: &str = "blosclz";
-#[allow(dead_code)]
-const COMPRESSOR_LZ4: &str = "lz4";
-#[allow(dead_code)]
-const COMPRESSOR_ZLIB: &str = "zlib";
-#[allow(dead_code)]
-const COMPRESSOR_ZSTD: &str = "zstd";
+pub const BLOSC_BLOSCLZ_COMPNAME: &[u8; 8usize] = b"blosclz\0";
+pub const BLOSC_LZ4_COMPNAME: &[u8; 4usize] = b"lz4\0";
+pub const BLOSC_ZLIB_COMPNAME: &[u8; 5usize] = b"zlib\0";
+pub const BLOSC_ZSTD_COMPNAME: &[u8; 5usize] = b"zstd\0";
+
+/// compressor types. https://github.com/asomers/blosc-rs/blob/master/blosc/src/lib.rs#L73
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum Compressor {
+    /// The default compressor, based on FastLZ.  It's very fast, but the
+    /// compression isn't as good as the other compressors.
+    BloscLZ,
+    /// Another fast compressor.  See [lz4.org](http://www.lz4.org).
+    LZ4,
+    /// The venerable Zlib.  Slower, but better compression than most other
+    /// algorithms.  See [zlib.net](https://www.zlib.net)
+    Zlib,
+    /// A high compression algorithm from Facebook.
+    /// See [zstd](https://facebook.github.io/zstd).
+    Zstd,
+}
+
+impl From<Compressor> for *const c_char {
+    fn from(compressor: Compressor) -> Self {
+        let compref = match compressor {
+            Compressor::BloscLZ => BLOSC_BLOSCLZ_COMPNAME.as_ptr(),
+            Compressor::LZ4 => BLOSC_LZ4_COMPNAME.as_ptr(),
+            Compressor::Zlib => BLOSC_ZLIB_COMPNAME.as_ptr(),
+            Compressor::Zstd => BLOSC_ZSTD_COMPNAME.as_ptr(),
+        };
+        compref as *const c_char
+    }
+}
 
 /// An unspecified error from C-Blosc
 /// Same BloscError as github.com/asomers/blosc-rs (blosc v0.1.3)
@@ -76,7 +100,7 @@ pub struct BloscCompression {
     blocksize: usize,
     #[serde(default = "default_blosc_clevel")]
     clevel: u8,
-    cname: String,
+    cname: Compressor,
     #[serde(default = "default_blosc_shufflemode")]
     shuffle: u8, // serialize shuffle mode into enum by index
     #[serde(default = "default_blosc_id")]
@@ -104,7 +128,7 @@ impl Default for BloscCompression {
         BloscCompression {
             blocksize: default_blosc_blocksize(),
             clevel: 5,
-            cname: String::from(COMPRESSOR_BLOSCLZ),
+            cname: Compressor::BloscLZ,
             shuffle: default_blosc_shufflemode(),
             id: default_blosc_id(),
         }
@@ -171,7 +195,7 @@ impl BloscCompression {
                 src.as_ptr() as *const c_void,
                 dest.as_mut_ptr() as *mut c_void,
                 dest_size,
-                BLOSC_BLOSCLZ_COMPNAME.as_ptr() as *const c_char,
+                self.cname.clone().into(),
                 self.blocksize,
                 1,
             )
@@ -271,7 +295,7 @@ mod tests {
         let blosc_lz4: BloscCompression = BloscCompression {
             blocksize: 0,
             clevel: 5,
-            cname: COMPRESSOR_LZ4.to_string(),
+            cname: Compressor::LZ4,
             shuffle: 1,
             id: "blosc".to_string(),
         };
@@ -286,7 +310,7 @@ mod tests {
         let blosc_lz4: BloscCompression = BloscCompression {
             blocksize: 0,
             clevel: 5,
-            cname: COMPRESSOR_LZ4.to_string(),
+            cname: Compressor::LZ4,
             shuffle: 1,
             id: "blosc".to_string(),
         };
