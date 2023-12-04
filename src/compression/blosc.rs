@@ -54,6 +54,7 @@ pub const BLOSC_ZSTD_COMPNAME: &[u8; 5usize] = b"zstd\0";
 
 /// compressor types. https://github.com/asomers/blosc-rs/blob/master/blosc/src/lib.rs#L73
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum Compressor {
     /// The default compressor, based on FastLZ.  It's very fast, but the
     /// compression isn't as good as the other compressors.
