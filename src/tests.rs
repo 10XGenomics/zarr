@@ -1,98 +1,10 @@
-use super::chunk::{
-    DefaultChunk,
-    DefaultChunkReader,
-    DefaultChunkWriter,
-};
+use std::io::Cursor;
+
+use anyhow::Result;
+use serde_json::{json, Value};
+
+use super::chunk::{DefaultChunk, DefaultChunkReader, DefaultChunkWriter};
 use super::*;
-use std::io::{
-    Cursor,
-    Result,
-};
-
-use serde_json::json;
-
-#[cfg(feature = "gzip")]
-#[test]
-fn array_metadata_deserialization() {
-    use super::*;
-
-    let example_json = r#"
-        {
-            "shape": [10000, 1000],
-            "data_type": "<f8",
-            "chunk_grid": {
-                "type": "regular",
-                "chunk_shape": [1000, 100],
-                "separator" : "/"
-            },
-            "chunk_memory_layout": "C",
-            "compressor": {
-                "codec": "https://purl.org/zarr/spec/codec/gzip/1.0",
-                "configuration": {
-                    "level": 1
-                }
-            },
-            "fill_value": "NaN",
-            "extensions": [],
-            "attributes": {
-                "foo": 42,
-                "bar": "apples",
-                "baz": [1, 2, 3, 4]
-            }
-        }
-        "#;
-    let deserialized: ArrayMetadata = serde_json::from_str(example_json).unwrap();
-
-    let mut expected = ArrayMetadata {
-        shape: smallvec![10000, 1000],
-        data_type: ExtensibleDataType::Core(DataType::Float {
-            size: FloatSize::B8,
-            endian: Endian::Little,
-        }),
-        chunk_grid: ChunkGridMetadata {
-            grid_type: REGULAR_GRID_TYPE.into(),
-            chunk_shape: smallvec![1000, 100],
-            separator: "/".into(),
-        },
-        chunk_memory_layout: Order::RowMajor,
-        compressor: crate::compression::gzip::GzipCompression { level: 1 }.into(),
-        fill_value: Some(json!("NaN")),
-        extensions: vec![],
-        attributes: vec![
-            ("foo".into(), json!(42)),
-            ("bar".into(), json!("apples")),
-            ("baz".into(), json!([1, 2, 3, 4])),
-        ]
-        .into_iter()
-        .collect(),
-    };
-
-    assert_eq!(deserialized, expected);
-
-    let example_json = r#"
-        {
-            "shape": [10000, 1000],
-            "data_type": "<f8",
-            "chunk_grid": {
-                "type": "regular",
-                "chunk_shape": [1000, 100],
-                "separator" : "/"
-            },
-            "chunk_memory_layout": "C",
-            "fill_value": "NaN",
-            "extensions": [],
-            "attributes": {
-                "foo": 42,
-                "bar": "apples",
-                "baz": [1, 2, 3, 4]
-            }
-        }
-        "#;
-    let deserialized: ArrayMetadata = serde_json::from_str(example_json).unwrap();
-    expected.compressor = crate::compression::raw::RawCompression.into();
-
-    assert_eq!(deserialized, expected);
-}
 
 const DOC_SPEC_CHUNK_DATA: [i16; 6] = [1, 2, 3, 4, 5, 6];
 
@@ -140,8 +52,8 @@ pub(crate) fn test_read_doc_spec_chunk(chunk: &[u8], compression: compression::C
     )
     .expect("read_chunk failed");
 
-    assert_eq!(chunk.get_grid_position(), &[0, 0, 0]);
-    assert_eq!(chunk.get_data(), &DOC_SPEC_CHUNK_DATA);
+    assert_eq!(chunk.grid_position(), &[0, 0, 0]);
+    assert_eq!(chunk.data(), &DOC_SPEC_CHUNK_DATA);
 }
 
 pub(crate) fn test_write_doc_spec_chunk(
@@ -184,8 +96,8 @@ pub(crate) fn test_chunk_compression_rw(compression: compression::CompressionTyp
     )
     .expect("read_chunk failed");
 
-    assert_eq!(chunk_out.get_grid_position(), &[0, 0, 0]);
-    assert_eq!(chunk_out.get_data(), &chunk_data[..]);
+    assert_eq!(chunk_out.grid_position(), &[0, 0, 0]);
+    assert_eq!(chunk_out.data(), &chunk_data[..]);
 }
 
 pub(crate) fn test_varlength_chunk_rw(compression: compression::CompressionType) {
@@ -228,11 +140,7 @@ pub(crate) fn create_backend<N: ZarrTestable>() {
 
     let read = create.open_reader();
 
-    assert!(read
-        .get_version()
-        .expect("Cannot read version")
-        .matches(&crate::VERSION));
-    assert_eq!(read.list_attributes("").unwrap()["foo"], "bar");
+    assert_eq!(read.get_attributes("").unwrap().unwrap()["foo"], "bar");
 }
 
 pub(crate) fn create_array<N: ZarrTestable>() {
@@ -242,7 +150,7 @@ pub(crate) fn create_array<N: ZarrTestable>() {
         smallvec![10, 10, 10],
         smallvec![5, 5, 5],
         i32::ZARR_TYPE,
-        crate::compression::CompressionType::Raw(crate::compression::raw::RawCompression::default()),
+        crate::compression::CompressionType::Raw(crate::compression::raw::RawCompression),
     );
     create
         .create_array("foo/bar", &array_meta)
@@ -260,7 +168,7 @@ pub(crate) fn absolute_relative_paths<N: ZarrTestable>() -> Result<()> {
         smallvec![10, 10, 10],
         smallvec![5, 5, 5],
         i32::ZARR_TYPE,
-        crate::compression::CompressionType::Raw(crate::compression::raw::RawCompression::default()),
+        crate::compression::CompressionType::Raw(crate::compression::raw::RawCompression),
     );
     create
         .create_array("foo/bar", &array_meta)
@@ -287,14 +195,7 @@ pub(crate) fn attributes_rw<N: ZarrTestable>() {
     let group = "foo/bar";
     create.create_group(group).expect("Failed to create group");
 
-    assert_eq!(
-        Value::Object(create.list_attributes(group).unwrap()),
-        json!({})
-    );
-
-    // Currently reading attributes of an implicit group is an error.
-    // Whether this should be the case is still open for decision.
-    assert!(create.list_attributes("foo").is_err());
+    assert_eq!(create.get_attributes(group).unwrap(), None);
 
     let attrs_1 = json!({
         "foo": {"bar": 42},
@@ -306,7 +207,7 @@ pub(crate) fn attributes_rw<N: ZarrTestable>() {
     create
         .set_attributes(group, attrs_1.clone())
         .expect("Failed to set attributes");
-    assert_eq!(create.list_attributes(group).unwrap(), attrs_1);
+    assert_eq!(create.get_attributes(group).unwrap().unwrap(), attrs_1);
 
     let attrs_2 = json!({
         "baz": [4, 5, 6],
@@ -318,7 +219,7 @@ pub(crate) fn attributes_rw<N: ZarrTestable>() {
         .set_attributes(group, attrs_2)
         .expect("Failed to set attributes");
     assert_eq!(
-        Value::Object(create.list_attributes(group).unwrap()),
+        Value::Object(create.get_attributes(group).unwrap().unwrap()),
         json!({
             "foo": {"bar": 42},
             "baz": [4, 5, 6],
@@ -336,7 +237,7 @@ pub(crate) fn attributes_rw<N: ZarrTestable>() {
         .set_attributes(group, attrs_2)
         .expect("Failed to set attributes");
     assert_eq!(
-        Value::Object(create.list_attributes(group).unwrap()),
+        Value::Object(create.get_attributes(group).unwrap().unwrap()),
         json!({
             "foo": {"moo": 7},
             "baz": [4, 5, 6],
@@ -353,7 +254,7 @@ pub(crate) fn attributes_rw<N: ZarrTestable>() {
     create
         .set_attributes(group, attrs_3.clone())
         .expect("Failed to set attributes");
-    assert_eq!(create.list_attributes(group).unwrap(), attrs_3);
+    assert_eq!(create.get_attributes(group).unwrap().unwrap(), attrs_3);
 
     // Test attributes for arrays also.
     let array = "baz";
@@ -361,20 +262,17 @@ pub(crate) fn attributes_rw<N: ZarrTestable>() {
         smallvec![10, 10, 10],
         smallvec![5, 5, 5],
         i32::ZARR_TYPE,
-        crate::compression::CompressionType::Raw(crate::compression::raw::RawCompression::default()),
+        crate::compression::CompressionType::Raw(crate::compression::raw::RawCompression),
     );
     create
         .create_array(array, &array_meta)
         .expect("Failed to create array");
 
-    assert_eq!(
-        Value::Object(create.list_attributes(array).unwrap()),
-        json!({})
-    );
+    assert_eq!(create.get_attributes(array).unwrap(), None);
     create
         .set_attributes(array, attrs_1.clone())
         .expect("Failed to set attributes");
-    assert_eq!(create.list_attributes(array).unwrap(), attrs_1);
+    assert_eq!(create.get_attributes(array).unwrap().unwrap(), attrs_1);
 }
 
 pub(crate) fn create_chunk_rw<N: ZarrTestable>() {
@@ -384,7 +282,7 @@ pub(crate) fn create_chunk_rw<N: ZarrTestable>() {
         smallvec![10, 10, 10],
         smallvec![5, 5, 5],
         i32::ZARR_TYPE,
-        crate::compression::CompressionType::Raw(crate::compression::raw::RawCompression::default()),
+        crate::compression::CompressionType::Raw(crate::compression::raw::RawCompression),
     );
     let chunk_data: Vec<i32> = (0..125_i32).collect();
     let chunk_in = crate::SliceDataChunk::new(smallvec![0, 0, 0], &chunk_data);
@@ -405,7 +303,7 @@ pub(crate) fn create_chunk_rw<N: ZarrTestable>() {
         .read_chunk::<i32>("foo/bar", &array_meta, smallvec![0, 0, 1])
         .expect("Failed to read chunk");
 
-    assert_eq!(chunk_out.get_data(), &chunk_data[..]);
+    assert_eq!(chunk_out.data(), &chunk_data[..]);
     assert!(missing_chunk_out.is_none());
 
     // Shorten data (this still will not catch trailing data less than the length).
@@ -423,7 +321,7 @@ pub(crate) fn delete_chunk<N: ZarrTestable>() {
         smallvec![10, 100, 100],
         smallvec![5, 5, 5],
         i32::ZARR_TYPE,
-        crate::compression::CompressionType::Raw(crate::compression::raw::RawCompression::default()),
+        crate::compression::CompressionType::Raw(crate::compression::raw::RawCompression),
     );
 
     let coord_a = smallvec![1, 2, 3];
@@ -450,7 +348,7 @@ pub(crate) fn delete_chunk<N: ZarrTestable>() {
     assert!(create.delete_chunk(array, &array_meta, &coord_b).unwrap());
 
     assert!(create
-        .read_chunk::<i32>(array, &array_meta, coord_a.clone())
+        .read_chunk::<i32>(array, &array_meta, coord_a)
         .expect("Failed to read chunk")
         .is_none());
 }
@@ -469,7 +367,7 @@ macro_rules! test_backend {
         }
 
         #[test]
-        fn absolute_relative_paths() -> Result<()> {
+        fn absolute_relative_paths() -> anyhow::Result<()> {
             $crate::tests::absolute_relative_paths::<$backend>()
         }
 

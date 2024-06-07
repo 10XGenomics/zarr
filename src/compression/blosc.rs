@@ -43,7 +43,9 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use blosc_src::*;
+use blosc_src::{
+    blosc_cbuffer_sizes, blosc_compress_ctx, blosc_decompress_ctx, BLOSC_MAX_OVERHEAD,
+};
 
 use super::Compression;
 
@@ -53,7 +55,7 @@ pub const BLOSC_ZLIB_COMPNAME: &[u8; 5usize] = b"zlib\0";
 pub const BLOSC_ZSTD_COMPNAME: &[u8; 5usize] = b"zstd\0";
 
 /// compressor types. https://github.com/asomers/blosc-rs/blob/master/blosc/src/lib.rs#L73
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Compressor {
     /// The default compressor, based on FastLZ.  It's very fast, but the
@@ -196,7 +198,7 @@ impl BloscCompression {
                 src.as_ptr() as *const c_void,
                 dest.as_mut_ptr() as *mut c_void,
                 dest_size,
-                self.cname.clone().into(),
+                self.cname.into(),
                 self.blocksize,
                 1,
             )
@@ -272,6 +274,59 @@ impl Compression for BloscCompression {
             inner_buffer: Vec::new(),
             finished: false,
         })
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct BloscCompressionBuilder {
+    blocksize: Option<usize>,
+    clevel: Option<u8>,
+    shuffle: Option<u8>,
+    cname: Compressor,
+}
+
+impl BloscCompressionBuilder {
+    /// Create a new [`BloscCompressionBuilder`] with the given compressor.
+    pub fn new(cname: Compressor) -> Self {
+        Self {
+            cname,
+            blocksize: None,
+            clevel: None,
+            shuffle: None,
+        }
+    }
+
+    /// Set the block size.
+    pub fn blocksize(mut self, blocksize: usize) -> Self {
+        self.blocksize = Some(blocksize);
+        self
+    }
+    /// Set the compression level.
+    pub fn clevel(mut self, clevel: u8) -> Self {
+        self.clevel = Some(clevel);
+        self
+    }
+    /// Set the shuffle.
+    pub fn shuffle(mut self, shuffle: u8) -> Self {
+        self.shuffle = Some(shuffle);
+        self
+    }
+
+    /// Build the [`BloscCompression`].
+    pub fn build(self) -> BloscCompression {
+        let BloscCompressionBuilder {
+            blocksize,
+            clevel,
+            cname,
+            shuffle,
+        } = self;
+        BloscCompression {
+            blocksize: blocksize.unwrap_or_else(default_blosc_blocksize),
+            clevel: clevel.unwrap_or_else(default_blosc_clevel),
+            cname,
+            shuffle: shuffle.unwrap_or_else(default_blosc_shufflemode),
+            id: default_blosc_id(),
+        }
     }
 }
 

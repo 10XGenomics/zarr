@@ -22,7 +22,7 @@ fn test_read_ndarray() {
         i32::ZARR_TYPE,
         CompressionType::default(),
     );
-    let numel = array_meta.get_chunk_num_elements();
+    let numel = array_meta.chunk_num_elements();
 
     let path_name = "test/array/group";
     n.create_array(path_name, &array_meta)
@@ -107,7 +107,7 @@ fn test_read_ndarray_oob() {
     let chunk_shape = smallvec![50, 100];
     let array_meta = ArrayMetadata::new(
         smallvec![100, 200],
-        chunk_shape.clone(),
+        chunk_shape,
         i32::ZARR_TYPE,
         CompressionType::default(),
     );
@@ -139,7 +139,7 @@ fn test_write_read_ndarray() {
     let chunk_shape = smallvec![3, 4, 2, 1];
     let array_meta = ArrayMetadata::new(
         smallvec![3, 300, 200, 100],
-        chunk_shape.clone(),
+        chunk_shape,
         i32::ZARR_TYPE,
         CompressionType::default(),
     );
@@ -152,7 +152,7 @@ fn test_write_read_ndarray() {
     let arr_shape = [3, 35, 15, 7];
     let array: Array<i32, _> =
         Array::from_iter(rng.sample_iter(&Standard).take(arr_shape.iter().product()))
-            .into_shape(arr_shape.clone())
+            .into_shape(arr_shape)
             .unwrap()
             .into_dyn();
     let offset = smallvec![0, 5, 4, 3];

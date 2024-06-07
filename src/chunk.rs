@@ -22,14 +22,23 @@ pub trait ReinitDataChunk<T> {
 pub trait ReadableDataChunk {
     /// Read data into this chunk from a source, overwriting any existing data.
     ///
-    /// Read the stream directly into the chunk data instead
-    /// of creating a copied byte buffer.
+    /// Read the stream directly into the chunk data instead of creating a copied byte buffer.
+    ///
+    /// # Errors
+    ///
+    /// A call to `read_data` may return an I/O error indicating the operation could not be
+    /// completed.
     fn read_data<R: Read>(&mut self, source: R, array_meta: &ArrayMetadata) -> Result<()>;
 }
 
 /// Traits for data chunks that can write out data.
 pub trait WriteableDataChunk {
     /// Write the data from this chunk into a target.
+    ///
+    /// # Errors
+    ///
+    /// A call to `write_data` may return an I/O error indicating the operation could not be
+    /// completed.
     fn write_data<W: Write>(&self, target: W, array_meta: &ArrayMetadata) -> Result<()>;
 }
 
@@ -37,11 +46,14 @@ pub trait WriteableDataChunk {
 ///
 /// To enable custom types to be written to Zarr volumes, implement this trait.
 pub trait DataChunk<T> {
-    fn get_grid_position(&self) -> &[u64];
+    /// Returns the grid coordinates of this [`DataChunk`].
+    fn grid_position(&self) -> &[u64];
 
-    fn get_data(&self) -> &[T];
+    /// Returns a slice of the underlying data of this [`DataChunk`].
+    fn data(&self) -> &[T];
 
-    fn get_num_elements(&self) -> u32;
+    /// Returns the number of elements of this [`DataChunk`].
+    fn num_elements(&self) -> u32;
 }
 
 /// A generic data chunk container wrapping any type that can be taken as a
@@ -54,6 +66,7 @@ pub struct SliceDataChunk<T: ReflectedType, C> {
 }
 
 impl<T: ReflectedType, C> SliceDataChunk<T, C> {
+    /// Create a new [`SliceDataChunk`] with the given `grid_position` and raw `data`.
     pub fn new(grid_position: GridCoord, data: C) -> SliceDataChunk<T, C> {
         SliceDataChunk {
             data_type: PhantomData,
@@ -62,6 +75,7 @@ impl<T: ReflectedType, C> SliceDataChunk<T, C> {
         }
     }
 
+    /// Consume this [`SliceDataChunk`] and return the underlying data.
     pub fn into_data(self) -> C {
         self.data
     }
@@ -73,14 +87,14 @@ pub type VecDataChunk<T> = SliceDataChunk<T, Vec<T>>;
 
 impl<T: ReflectedType> ReinitDataChunk<T> for VecDataChunk<T> {
     fn reinitialize(&mut self, grid_position: &GridCoord, num_el: u32) {
-        self.grid_position = grid_position.clone();
+        self.grid_position.clone_from(grid_position);
         self.data.resize_with(num_el as usize, Default::default);
     }
 
     fn reinitialize_with<B: DataChunk<T>>(&mut self, other: &B) {
-        self.grid_position = other.get_grid_position().into();
+        self.grid_position = other.grid_position().into();
         self.data.clear();
-        self.data.extend_from_slice(other.get_data());
+        self.data.extend_from_slice(other.data());
     }
 }
 
@@ -92,7 +106,7 @@ macro_rules! vec_data_chunk_impl {
                 mut source: R,
                 array_meta: &ArrayMetadata,
             ) -> Result<()> {
-                match array_meta.data_type.effective_type()?.endian() {
+                match array_meta.dtype().endian() {
                     Endian::Big => source.$bo_read_fn::<BigEndian>(self.data.as_mut()),
                     Endian::Little => source.$bo_read_fn::<LittleEndian>(self.data.as_mut()),
                     Endian::NotRelevant => panic!("Must specify endianness for byte sized data"),
@@ -110,7 +124,7 @@ macro_rules! vec_data_chunk_impl {
                 let mut buf: [u8; CHUNK * std::mem::size_of::<$ty_name>()] =
                     [0; CHUNK * std::mem::size_of::<$ty_name>()];
 
-                let endian = array_meta.data_type.effective_type()?.endian();
+                let endian = array_meta.dtype().endian();
                 for c in self.data.as_ref().chunks(CHUNK) {
                     let byte_len = c.len() * std::mem::size_of::<$ty_name>();
                     match endian {
@@ -196,7 +210,7 @@ impl<C: AsRef<[bool]>> WriteableDataChunk for SliceDataChunk<bool, C> {
 impl<C: AsMut<[f16]>> ReadableDataChunk for SliceDataChunk<f16, C> {
     fn read_data<R: Read>(&mut self, mut source: R, array_meta: &ArrayMetadata) -> Result<()> {
         // TODO: no chunking
-        let endian = array_meta.data_type.effective_type()?.endian();
+        let endian = array_meta.dtype().endian();
         for n in self.data.as_mut() {
             let mut bytes = [0; 2];
             source.read_exact(&mut bytes[..])?;
@@ -213,7 +227,7 @@ impl<C: AsMut<[f16]>> ReadableDataChunk for SliceDataChunk<f16, C> {
 impl<C: AsRef<[f16]>> WriteableDataChunk for SliceDataChunk<f16, C> {
     fn write_data<W: Write>(&self, mut target: W, array_meta: &ArrayMetadata) -> Result<()> {
         // TODO: no chunking
-        let endian = array_meta.data_type.effective_type()?.endian();
+        let endian = array_meta.dtype().endian();
         for n in self.data.as_ref() {
             let bytes = match endian {
                 Endian::Big => n.to_be_bytes(),
@@ -227,25 +241,21 @@ impl<C: AsRef<[f16]>> WriteableDataChunk for SliceDataChunk<f16, C> {
 }
 
 impl<T: ReflectedType, C: AsRef<[T]>> DataChunk<T> for SliceDataChunk<T, C> {
-    fn get_grid_position(&self) -> &[u64] {
+    fn grid_position(&self) -> &[u64] {
         &self.grid_position
     }
 
-    fn get_data(&self) -> &[T] {
+    fn data(&self) -> &[T] {
         self.data.as_ref()
     }
 
-    fn get_num_elements(&self) -> u32 {
+    fn num_elements(&self) -> u32 {
         self.data.as_ref().len() as u32
     }
 }
 
 fn check_array_type<T: ReflectedType>(array_meta: &ArrayMetadata) -> Result<()> {
-    if array_meta
-        .data_type
-        .effective_type()?
-        .eq_modulo_endian(&T::ZARR_TYPE)
-    {
+    if array_meta.dtype().eq_modulo_endian(&T::ZARR_TYPE) {
         Ok(())
     } else {
         Err(Error::new(
@@ -257,6 +267,12 @@ fn check_array_type<T: ReflectedType>(array_meta: &ArrayMetadata) -> Result<()> 
 
 /// Reads chunks from rust readers.
 pub trait DefaultChunkReader<T: ReflectedType, R: Read> {
+    /// Read and decode a chunk from `buffer`.
+    ///
+    /// # Errors
+    ///
+    /// A call to `read_chunk` may return an I/O error indicating the operation could not be
+    /// completed.
     fn read_chunk(
         buffer: R,
         array_meta: &ArrayMetadata,
@@ -268,13 +284,19 @@ pub trait DefaultChunkReader<T: ReflectedType, R: Read> {
         check_array_type::<T>(array_meta)?;
 
         let mut chunk =
-            T::create_data_chunk(&grid_position, array_meta.get_chunk_num_elements() as u32);
-        let mut decompressed = array_meta.compressor.decoder(buffer);
+            T::create_data_chunk(&grid_position, array_meta.chunk_num_elements() as u32);
+        let mut decompressed = array_meta.compressor().decoder(buffer);
         chunk.read_data(&mut decompressed, array_meta)?;
 
         Ok(chunk)
     }
 
+    /// Read a chunk from `buffer` into a pre-allocated chunk.
+    ///
+    /// # Errors
+    ///
+    /// A call to `read_chunk_into` may return an I/O error indicating the operation could not be
+    /// completed.
     fn read_chunk_into<B: DataChunk<T> + ReinitDataChunk<T> + ReadableDataChunk>(
         buffer: R,
         array_meta: &ArrayMetadata,
@@ -283,8 +305,8 @@ pub trait DefaultChunkReader<T: ReflectedType, R: Read> {
     ) -> Result<()> {
         check_array_type::<T>(array_meta)?;
 
-        chunk.reinitialize(&grid_position, array_meta.get_chunk_num_elements() as u32);
-        let mut decompressed = array_meta.compressor.decoder(buffer);
+        chunk.reinitialize(&grid_position, array_meta.chunk_num_elements() as u32);
+        let mut decompressed = array_meta.compressor().decoder(buffer);
         chunk.read_data(&mut decompressed, array_meta)?;
 
         Ok(())
@@ -293,20 +315,26 @@ pub trait DefaultChunkReader<T: ReflectedType, R: Read> {
 
 /// Writes chunks to rust writers.
 pub trait DefaultChunkWriter<T: ReflectedType, W: Write, B: DataChunk<T> + WriteableDataChunk> {
+    /// Write compressed chunk data to the `buffer`.
+    ///
+    /// # Errors
+    ///
+    /// A call to `write_chunk` may return an I/O error indicating the operation could not be
+    /// completed.
     fn write_chunk(buffer: W, array_meta: &ArrayMetadata, chunk: &B) -> Result<()> {
         check_array_type::<T>(array_meta)?;
 
-        if chunk.get_num_elements() as usize != array_meta.get_chunk_num_elements() {
+        if chunk.num_elements() as usize != array_meta.chunk_num_elements() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 format!(
                     "Can not write chunk with too few elements. Expected {} given {}",
-                    array_meta.get_chunk_num_elements(),
-                    chunk.get_num_elements()
+                    array_meta.chunk_num_elements(),
+                    chunk.num_elements()
                 ),
             ));
         }
-        let mut compressor = array_meta.compressor.encoder(buffer);
+        let mut compressor = array_meta.compressor().encoder(buffer);
         chunk.write_data(&mut compressor, array_meta)?;
 
         Ok(())

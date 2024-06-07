@@ -3,100 +3,112 @@ use std::io::Write;
 use half::f16;
 use serde::{Deserialize, Serialize};
 
-use crate::{GridCoord, MetadataError, VecDataChunk};
+use crate::{GridCoord, VecDataChunk};
 
+/// Sizes for boolean types.
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum BoolSize {
+    /// A single byte.
     B1,
 }
 
 impl BoolSize {
     fn deserial_char(c: char) -> Option<Self> {
-        use BoolSize::*;
         match c {
-            '1' => Some(B1),
+            '1' => Some(BoolSize::B1),
             _ => None,
         }
     }
 
     fn serial_char(&self) -> char {
-        use BoolSize::*;
         match self {
-            B1 => '1',
+            BoolSize::B1 => '1',
         }
     }
 }
 
+/// Sizes for integer types.
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum IntSize {
+    /// Single byte integer (`i8`, `u8`)
     B1,
+    /// Two byte integer (`i16`, `u16`)
     B2,
+    /// Four byte integer (`i32`, `u32`)
     B4,
+    /// Eight byte integer (`i64`, `u64`)
     B8,
 }
 
 impl IntSize {
     fn deserial_char(c: char) -> Option<Self> {
-        use IntSize::*;
         match c {
-            '1' => Some(B1),
-            '2' => Some(B2),
-            '4' => Some(B4),
-            '8' => Some(B8),
+            '1' => Some(IntSize::B1),
+            '2' => Some(IntSize::B2),
+            '4' => Some(IntSize::B4),
+            '8' => Some(IntSize::B8),
             _ => None,
         }
     }
 
     fn serial_char(&self) -> char {
-        use IntSize::*;
         match self {
-            B1 => '1',
-            B2 => '2',
-            B4 => '4',
-            B8 => '8',
+            IntSize::B1 => '1',
+            IntSize::B2 => '2',
+            IntSize::B4 => '4',
+            IntSize::B8 => '8',
         }
     }
 }
 
+/// Sizes for floating-point types.
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum FloatSize {
+    /// Two byte float (`f16`)
     B2,
+    /// Four byte float (`f32`)
     B4,
+    /// Eight byte float (`f64`)
     B8,
 }
 
 impl FloatSize {
     fn deserial_char(c: char) -> Option<Self> {
-        use FloatSize::*;
         match c {
-            '2' => Some(B2),
-            '4' => Some(B4),
-            '8' => Some(B8),
+            '2' => Some(FloatSize::B2),
+            '4' => Some(FloatSize::B4),
+            '8' => Some(FloatSize::B8),
             _ => None,
         }
     }
 
     fn serial_char(&self) -> char {
-        use FloatSize::*;
         match self {
-            B2 => '2',
-            B4 => '4',
-            B8 => '8',
+            FloatSize::B2 => '2',
+            FloatSize::B4 => '4',
+            FloatSize::B8 => '8',
         }
     }
 }
 
+/// Endianness of a data type.
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum Endian {
+    /// Big endian (most significant bytes first)
     Big,
+    /// Big endian (least significant bytes first)
     Little,
+    /// Endianness doesn't matter (e.g., a `bool`)
     NotRelevant,
 }
 
 #[cfg(target_endian = "big")]
+/// Default `Endian` for the system
 pub const NATIVE_ENDIAN: Endian = Endian::Big;
 #[cfg(target_endian = "little")]
+/// Default `Endian` for the system
 pub const NATIVE_ENDIAN: Endian = Endian::Little;
+/// Default `Endian` for network protocols
 pub const NETWORK_ENDIAN: Endian = Endian::Big;
 
 impl Endian {
@@ -133,11 +145,251 @@ impl Endian {
 /// ```
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum DataType {
-    Bool { size: BoolSize, endian: Endian },
-    Int { size: IntSize, endian: Endian },
-    UInt { size: IntSize, endian: Endian },
-    Float { size: FloatSize, endian: Endian },
-    Raw { size: usize },
+    /// A boolean data type
+    Bool {
+        /// The size of the boolean
+        size: BoolSize,
+        /// Endianness of the boolean
+        endian: Endian,
+    },
+    /// A signed integer data type
+    Int {
+        /// The size of the signed integer type
+        size: IntSize,
+        /// The endianness of the signed integer type
+        endian: Endian,
+    },
+    /// An unsigned integer data type
+    UInt {
+        /// The size of the unsigned integer type
+        size: IntSize,
+        /// The endianness of the unsigned integer type
+        endian: Endian,
+    },
+    /// A floating point number data type
+    Float {
+        /// The size of the float type
+        size: FloatSize,
+        /// The endianness of the float type
+        endian: Endian,
+    },
+    /// Raw bytes
+    Raw {
+        /// The number of bytes for each item
+        size: usize,
+    },
+}
+
+impl DataType {
+    /// Create a boolean [`DataType`].
+    #[must_use]
+    pub fn bool() -> Self {
+        Self::Bool {
+            size: BoolSize::B1,
+            endian: Endian::NotRelevant,
+        }
+    }
+}
+
+impl DataType {
+    /// Create a 8-bit signed integer [`DataType`] with little-endian ordering.
+    #[must_use]
+    pub fn i8_le() -> Self {
+        DataType::Int {
+            size: IntSize::B1,
+            endian: Endian::Little,
+        }
+    }
+    /// Create a 8-bit signed integer [`DataType`] with big-endian ordering.
+    #[must_use]
+    pub fn i8_be() -> Self {
+        DataType::Int {
+            size: IntSize::B1,
+            endian: Endian::Big,
+        }
+    }
+
+    /// Create a 16-bit signed integer [`DataType`] with little-endian ordering.
+    #[must_use]
+    pub fn i16_le() -> Self {
+        DataType::Int {
+            size: IntSize::B2,
+            endian: Endian::Little,
+        }
+    }
+    /// Create a 16-bit signed integer [`DataType`] with big-endian ordering.
+    #[must_use]
+    pub fn i16_be() -> Self {
+        DataType::Int {
+            size: IntSize::B2,
+            endian: Endian::Big,
+        }
+    }
+
+    /// Create a 32-bit signed integer [`DataType`] with little-endian ordering.
+    #[must_use]
+    pub fn i32_le() -> Self {
+        DataType::Int {
+            size: IntSize::B4,
+            endian: Endian::Little,
+        }
+    }
+    /// Create a 32-bit signed integer [`DataType`] with big-endian ordering.
+    #[must_use]
+    pub fn i32_be() -> Self {
+        DataType::Int {
+            size: IntSize::B4,
+            endian: Endian::Big,
+        }
+    }
+
+    /// Create a 64-bit signed integer [`DataType`] with little-endian ordering.
+    #[must_use]
+    pub fn i64_le() -> Self {
+        DataType::Int {
+            size: IntSize::B8,
+            endian: Endian::Little,
+        }
+    }
+    /// Create a 64-bit signed integer [`DataType`] with big-endian ordering.
+    #[must_use]
+    pub fn i64_be() -> Self {
+        DataType::Int {
+            size: IntSize::B8,
+            endian: Endian::Big,
+        }
+    }
+}
+
+impl DataType {
+    /// Create a 8-bit unsigned integer [`DataType`] with little-endian ordering.
+    #[must_use]
+    pub fn u8_le() -> Self {
+        DataType::UInt {
+            size: IntSize::B1,
+            endian: Endian::Little,
+        }
+    }
+    /// Create a 8-bit unsigned integer [`DataType`] with big-endian ordering.
+    #[must_use]
+    pub fn u8_be() -> Self {
+        DataType::UInt {
+            size: IntSize::B1,
+            endian: Endian::Big,
+        }
+    }
+
+    /// Create a 16-bit unsigned integer [`DataType`] with little-endian ordering.
+    #[must_use]
+    pub fn u16_le() -> Self {
+        DataType::UInt {
+            size: IntSize::B2,
+            endian: Endian::Little,
+        }
+    }
+    /// Create a 16-bit unsigned integer [`DataType`] with big-endian ordering.
+    #[must_use]
+    pub fn u16_be() -> Self {
+        DataType::UInt {
+            size: IntSize::B2,
+            endian: Endian::Big,
+        }
+    }
+
+    /// Create a 32-bit unsigned integer [`DataType`] with little-endian ordering.
+    #[must_use]
+    pub fn u32_le() -> Self {
+        DataType::UInt {
+            size: IntSize::B4,
+            endian: Endian::Little,
+        }
+    }
+    /// Create a 32-bit unsigned integer [`DataType`] with big-endian ordering.
+    #[must_use]
+    pub fn u32_be() -> Self {
+        DataType::UInt {
+            size: IntSize::B4,
+            endian: Endian::Big,
+        }
+    }
+
+    /// Create a 64-bit unsigned integer [`DataType`] with little-endian ordering.
+    #[must_use]
+    pub fn u64_le() -> Self {
+        DataType::UInt {
+            size: IntSize::B8,
+            endian: Endian::Little,
+        }
+    }
+    /// Create a 64-bit unsigned integer [`DataType`] with big-endian ordering.
+    #[must_use]
+    pub fn u64_be() -> Self {
+        DataType::UInt {
+            size: IntSize::B8,
+            endian: Endian::Big,
+        }
+    }
+}
+
+impl DataType {
+    /// Create a 16-bit floating point [`DataType`] with little-endian ordering.
+    #[must_use]
+    pub fn f16_le() -> Self {
+        DataType::Float {
+            size: FloatSize::B2,
+            endian: Endian::Little,
+        }
+    }
+    /// Create a 16-bit floating point [`DataType`] with big-endian ordering.
+    #[must_use]
+    pub fn f16_be() -> Self {
+        DataType::Float {
+            size: FloatSize::B2,
+            endian: Endian::Big,
+        }
+    }
+
+    /// Create a 32-bit floating point [`DataType`] with little-endian ordering.
+    #[must_use]
+    pub fn f32_le() -> Self {
+        DataType::Float {
+            size: FloatSize::B4,
+            endian: Endian::Little,
+        }
+    }
+    /// Create a 32-bit floating point [`DataType`] with big-endian ordering.
+    #[must_use]
+    pub fn f32_be() -> Self {
+        DataType::Float {
+            size: FloatSize::B4,
+            endian: Endian::Big,
+        }
+    }
+
+    /// Create a 64-bit floating point [`DataType`] with little-endian ordering.
+    #[must_use]
+    pub fn f64_le() -> Self {
+        DataType::Float {
+            size: FloatSize::B8,
+            endian: Endian::Little,
+        }
+    }
+    /// Create a 64-bit floating point [`DataType`] with big-endian ordering.
+    #[must_use]
+    pub fn f64_be() -> Self {
+        DataType::Float {
+            size: FloatSize::B8,
+            endian: Endian::Big,
+        }
+    }
+}
+
+impl DataType {
+    /// Create a raw [`DataType`] with `size` bytes.
+    #[must_use]
+    pub fn raw(size: usize) -> Self {
+        DataType::Raw { size }
+    }
 }
 
 impl Serialize for DataType {
@@ -145,41 +397,40 @@ impl Serialize for DataType {
     where
         S: serde::Serializer,
     {
-        use DataType::*;
         let mut buf = [0u8; 32];
         let s = match self {
-            Bool { size, endian } => {
+            DataType::Bool { size, endian } => {
                 endian.serial_char().encode_utf8(&mut buf[0..1]);
                 'b'.encode_utf8(&mut buf[1..2]);
                 size.serial_char().encode_utf8(&mut buf[2..3]);
                 std::str::from_utf8(&buf[..3]).unwrap()
             }
-            Int {
+            DataType::Int {
                 size: IntSize::B1, ..
             } => "i1",
-            UInt {
+            DataType::UInt {
                 size: IntSize::B1, ..
             } => "u1",
-            Int { size, endian } => {
+            DataType::Int { size, endian } => {
                 endian.serial_char().encode_utf8(&mut buf[0..1]);
                 'i'.encode_utf8(&mut buf[1..2]);
                 size.serial_char().encode_utf8(&mut buf[2..3]);
                 std::str::from_utf8(&buf[..3]).unwrap()
             }
-            UInt { size, endian } => {
+            DataType::UInt { size, endian } => {
                 endian.serial_char().encode_utf8(&mut buf[0..1]);
                 'u'.encode_utf8(&mut buf[1..2]);
                 size.serial_char().encode_utf8(&mut buf[2..3]);
                 std::str::from_utf8(&buf[..3]).unwrap()
             }
-            Float { size, endian } => {
+            DataType::Float { size, endian } => {
                 endian.serial_char().encode_utf8(&mut buf[0..1]);
                 'f'.encode_utf8(&mut buf[1..2]);
                 size.serial_char().encode_utf8(&mut buf[2..3]);
                 std::str::from_utf8(&buf[..3]).unwrap()
             }
-            Raw { size } => {
-                write!(&mut buf[..], "r{}", size).expect("TODO");
+            DataType::Raw { size } => {
+                write!(&mut buf[..], "r{size}").expect("TODO");
                 std::str::from_utf8(&buf[..]).unwrap()
             }
         };
@@ -277,71 +528,6 @@ impl<'de> Deserialize<'de> for DataType {
         D: serde::Deserializer<'de>,
     {
         deserializer.deserialize_str(DataTypeVisitor)
-    }
-}
-
-/// TODO
-///
-/// ```
-/// use zarr::data_type::{
-///     DataType,
-///     IntSize,
-///     Endian,
-///     ExtensibleDataType,
-///     FloatSize,
-/// };
-/// use serde_json;
-///
-/// let example_1: ExtensibleDataType = serde_json::from_str(r#""<f8""#).unwrap();
-/// let ext_1 = ExtensibleDataType::Core(DataType::Float { size: FloatSize::B8, endian: Endian::Little });
-/// assert_eq!(example_1, ext_1);
-///
-/// let example_2: ExtensibleDataType = serde_json::from_str(r#"
-///     {
-///        "extension": "https://purl.org/zarr/spec/protocol/extensions/datetime-dtypes/1.0",
-///        "type": "<M8[ns]",
-///        "fallback": "<i8"
-///     }"#).unwrap();
-/// let ext_2 = ExtensibleDataType::Extended {
-///     extension: "https://purl.org/zarr/spec/protocol/extensions/datetime-dtypes/1.0".to_owned(),
-///     type_string: "<M8[ns]".to_owned(),
-///     fallback: Some(DataType::Int {size: IntSize::B8, endian: Endian::Little})
-/// };
-/// assert_eq!(example_2, ext_2);
-/// ```
-#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum ExtensibleDataType {
-    Core(DataType),
-    Extended {
-        extension: String,
-        #[serde(rename = "type")]
-        type_string: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        fallback: Option<DataType>,
-    },
-}
-
-// TODO: needs to be a trait generalizing over core and extended data types
-// providing sizing and other operations.
-
-impl ExtensibleDataType {
-    // TODO: kludge that will need to be replaced to support extended types.
-    pub fn effective_type(&self) -> Result<DataType, MetadataError> {
-        use ExtensibleDataType::*;
-        match self {
-            Core(d) => Ok(*d),
-            Extended {
-                fallback: Some(d), ..
-            } => Ok(*d),
-            _ => todo!(),
-        }
-    }
-}
-
-impl From<DataType> for ExtensibleDataType {
-    fn from(d: DataType) -> Self {
-        Self::Core(d)
     }
 }
 
@@ -446,16 +632,20 @@ macro_rules! data_type_match {
 
 impl DataType {
     /// Boilerplate method for reflection of primitive type sizes.
+    #[must_use]
     pub fn size_of(self) -> usize {
         data_type_match!(self, DataType::Raw { size } => { std::mem::size_of::<u8>() * size / 8 }, {
             std::mem::size_of::<RsType>()
         })
     }
 
+    /// Returns the [`Endian`] of the data type.
+    #[must_use]
     pub fn endian(self) -> Endian {
-        use DataType::*;
         match self {
-            Int { endian, .. } | UInt { endian, .. } | Float { endian, .. } => endian,
+            DataType::Int { endian, .. }
+            | DataType::UInt { endian, .. }
+            | DataType::Float { endian, .. } => endian,
             // These are single-byte types.
             _ => NATIVE_ENDIAN,
         }
@@ -475,7 +665,7 @@ impl DataType {
 
 impl std::fmt::Display for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -488,8 +678,11 @@ impl std::fmt::Display for DataType {
 pub trait ReflectedType:
     Send + Sync + Clone + Default + serde::de::DeserializeOwned + 'static
 {
+    /// The corresponding Zarr data type for this rust type.
     const ZARR_TYPE: DataType;
 
+    /// Create a [`VecDataChunk`] for this type, filled with the zeros/default values.
+    #[must_use]
     fn create_data_chunk(grid_position: &GridCoord, num_el: u32) -> VecDataChunk<Self> {
         VecDataChunk::<Self>::new(
             grid_position.clone(),

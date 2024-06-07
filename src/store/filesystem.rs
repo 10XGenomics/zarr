@@ -1,80 +1,30 @@
 //! A filesystem-backed Zarr hierarchy.
 
-use std::fs::{
-    self,
-    File,
-};
-use std::io::{
-    BufReader,
-    BufWriter,
-    Error,
-    ErrorKind,
-    Result,
-};
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::io::{BufReader, BufWriter, Error, ErrorKind, Result};
+use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
-use serde_json::{
-    self,
-    json,
-    Value,
-};
 use walkdir::WalkDir;
 
 use crate::{
-    storage::{
-        ListableStore,
-        ReadableStore,
-        WriteableStore,
-    },
-    EntryPointMetadata,
+    storage::{ListableStore, ReadableStore, WriteableStore},
     Hierarchy,
-    HierarchyReader,
-    MetadataError,
 };
 
 /// A filesystem-backed Zarr hierarchy.
 #[derive(Clone, Debug)]
 pub struct FilesystemHierarchy {
     base_path: PathBuf,
-    entry_point_metadata: EntryPointMetadata,
 }
 
-impl Hierarchy for FilesystemHierarchy {
-    fn get_entry_point_metadata(&self) -> &EntryPointMetadata {
-        &self.entry_point_metadata
-    }
-}
+impl Hierarchy for FilesystemHierarchy {}
 
 impl FilesystemHierarchy {
-    fn read_entry_point_metadata(base_path: &PathBuf) -> Result<EntryPointMetadata> {
-        let entry_point_path = base_path.join(crate::ENTRY_POINT_KEY);
-        let reader = BufReader::new(File::open(entry_point_path)?);
-        let metadata: EntryPointMetadata = serde_json::from_reader(reader)?;
-        if let Some(ext) = metadata.extensions.iter().find(|e| e.must_understand) {
-            // TODO: returning an io::Error wrapped custom error, rather than other
-            // way around.
-            return Err(MetadataError::UnknownRequiredExtension(ext.clone()).into());
-        }
-        Ok(metadata)
-    }
-
     /// Open an existing Zarr hierarchy by path.
     pub fn open<P: AsRef<std::path::Path>>(base_path: P) -> Result<FilesystemHierarchy> {
         let base_path = PathBuf::from(base_path.as_ref());
-        let entry_point_metadata = Self::read_entry_point_metadata(&base_path)?;
-
-        let reader = FilesystemHierarchy {
-            base_path,
-            entry_point_metadata,
-        };
-
-        let version = reader.get_version()?;
-
-        if !version.matches(&crate::VERSION) {
-            return Err(Error::new(ErrorKind::Other, "TODO: Incompatible version"));
-        }
-
+        let reader = FilesystemHierarchy { base_path };
         Ok(reader)
     }
 
@@ -83,70 +33,44 @@ impl FilesystemHierarchy {
     /// Note this will update the version attribute for existing hierarchys.
     pub fn open_or_create<P: AsRef<std::path::Path>>(base_path: P) -> Result<FilesystemHierarchy> {
         let base_path = PathBuf::from(base_path.as_ref());
-        let entry_point_path = base_path.join(crate::ENTRY_POINT_KEY);
 
-        let entry_point_metadata = if entry_point_path.exists() {
-            Self::read_entry_point_metadata(&base_path)?
-        } else {
+        if !base_path.exists() {
             fs::create_dir_all(&base_path)?;
-            let metadata = EntryPointMetadata::default();
-            let file = fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(entry_point_path)?;
-            file.lock_exclusive()?;
-
-            let writer = BufWriter::new(file);
-            serde_json::to_writer(writer, &metadata)?;
-            metadata
-        };
-
-        let reader = FilesystemHierarchy {
-            base_path,
-            entry_point_metadata,
-        };
-
-        let version = reader.get_version()?;
-
-        if !version.matches(&crate::VERSION) {
-            return Err(Error::new(ErrorKind::Other, "TODO: Incompatible version"));
         }
+
+        let reader = FilesystemHierarchy { base_path };
 
         Ok(reader)
     }
 
-    pub fn get_attributes(&self, key: &str) -> Result<Value> {
-        // TODO: no longer used, but should be adapted for getting array/group user attributes
-        let path = self.get_path(key)?;
-        if path.exists() && path.is_file() {
-            let file = File::open(path)?;
-            file.lock_shared()?;
-            let reader = BufReader::new(file);
-            Ok(serde_json::from_reader(reader)?)
-        } else {
-            let mut path = path;
-            // TODO
-            path.set_extension("");
-            path.set_extension("");
-            // Check for implicit group.
-            if path.exists() && path.is_file() {
-                Ok(json!({}))
-            } else {
-                Err(Error::new(ErrorKind::NotFound, "Path does not exist"))
-            }
-        }
-    }
+    // pub fn get_attributes(&self, key: &str) -> Result<Value> {
+    //     // TODO: no longer used, but should be adapted for getting array/group user attributes
+    //     let path = self.get_path(key)?;
+    //     if path.exists() && path.is_file() {
+    //         let file = File::open(path)?;
+    //         file.lock_shared()?;
+    //         let reader = BufReader::new(file);
+    //         Ok(serde_json::from_reader(reader)?)
+    //     } else {
+    //         let mut path = path;
+    //         // TODO
+    //         path.set_extension("");
+    //         path.set_extension("");
+    //         // Check for implicit group.
+    //         if path.exists() && path.is_file() {
+    //             Ok(json!({}))
+    //         } else {
+    //             Err(Error::new(ErrorKind::NotFound, "Path does not exist"))
+    //         }
+    //     }
+    // }
 
     /// Get the filesystem path for a given Zarr key.
     fn get_path(&self, key: &str) -> Result<PathBuf> {
         // Note: cannot use `canonicalize` on both the constructed array path
         // and `base_path` and check `starts_with`, because `canonicalize` also
         // requires the path exist.
-        use std::path::{
-            Component,
-            Path,
-        };
+        use std::path::Component;
 
         // Normalize the path to be relative.
         let mut components = Path::new(key).components();
@@ -314,20 +238,16 @@ impl WriteableStore for FilesystemHierarchy {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::test_backend;
-    use crate::tests::{
-        ContextWrapper,
-        ZarrTestable,
-    };
-    use crate::{
-        chunk::DataChunk,
-        data_type::ReflectedType,
-        ArrayMetadata,
-        HierarchyLister,
-        HierarchyWriter,
-    };
     use tempdir::TempDir;
+
+    use crate::test_backend;
+    use crate::tests::{ContextWrapper, ZarrTestable};
+    use crate::{
+        chunk::DataChunk, data_type::ReflectedType, ArrayMetadata, HierarchyLister,
+        HierarchyReader, HierarchyWriter,
+    };
+
+    use super::*;
 
     impl crate::tests::ZarrTestable for FilesystemHierarchy {
         type Wrapper = ContextWrapper<TempDir, FilesystemHierarchy>;
@@ -388,14 +308,10 @@ mod tests {
         let wrapper = FilesystemHierarchy::temp_new_rw();
         let dir = TempDir::new("rust_zarr_tests_dupe").unwrap();
         let mut linked_path = wrapper.context.path().to_path_buf();
-        linked_path.push(crate::META_ROOT_PATH.trim_start_matches('/'));
         linked_path.push("linked_array");
 
         std::fs::create_dir_all(linked_path.parent().unwrap()).unwrap();
-        #[cfg(target_family = "unix")]
         std::os::unix::fs::symlink(dir.path(), &linked_path).unwrap();
-        #[cfg(target_family = "windows")]
-        std::os::windows::fs::symlink_dir(dir.path(), &linked_path).unwrap();
 
         assert_eq!(wrapper.zarr.list_nodes("").unwrap(), vec!["linked_array"]);
         // TODO
@@ -405,9 +321,7 @@ mod tests {
             smallvec![10, 10, 10],
             smallvec![5, 5, 5],
             i32::ZARR_TYPE,
-            crate::compression::CompressionType::Raw(
-                crate::compression::raw::RawCompression::default(),
-            ),
+            crate::compression::CompressionType::Raw(crate::compression::raw::RawCompression),
         );
         wrapper
             .zarr
@@ -427,17 +341,15 @@ mod tests {
             smallvec![10, 10, 10],
             smallvec![5, 5, 5],
             i32::ZARR_TYPE,
-            crate::compression::CompressionType::Raw(
-                crate::compression::raw::RawCompression::default(),
-            ),
+            crate::compression::CompressionType::Raw(crate::compression::raw::RawCompression),
         );
         create
             .create_array("/foo/bar", &array_meta)
             .expect("Failed to create array");
         let uri = create
-            .get_chunk_uri("/foo/bar", &array_meta, &vec![1, 2, 3])
+            .get_chunk_uri("/foo/bar", &array_meta, &[1, 2, 3])
             .unwrap();
-        assert_eq!(uri, format!("file://{}/data/root/foo/bar/c1/2/3", path_str));
+        assert_eq!(uri, format!("file://{path_str}/foo/bar/1.2.3"));
     }
 
     #[test]
@@ -448,9 +360,7 @@ mod tests {
             smallvec![10, 10, 10],
             smallvec![5, 5, 5],
             i32::ZARR_TYPE,
-            crate::compression::CompressionType::Raw(
-                crate::compression::raw::RawCompression::default(),
-            ),
+            crate::compression::CompressionType::Raw(crate::compression::raw::RawCompression),
         );
         let chunk_data: Vec<i32> = (0..125_i32).collect();
         let chunk_in = crate::SliceDataChunk::new(smallvec![0, 0, 0], &chunk_data);
@@ -471,12 +381,12 @@ mod tests {
             .read_chunk::<i32>("foo/bar", &array_meta, smallvec![0, 0, 1])
             .expect("Failed to read chunk");
 
-        assert_eq!(chunk_out.get_data(), &chunk_data[..]);
+        assert_eq!(chunk_out.data(), &chunk_data[..]);
         assert!(missing_chunk_out.is_none());
 
         // Shorten data (this still will not catch trailing data less than the length).
         let chunk_data: Vec<i32> = (0..10_i32).collect();
-        array_meta.chunk_grid.chunk_shape = smallvec![5, 2, 1];
+        *array_meta.chunk_shape_mut() = smallvec![5, 2, 1];
         let chunk_in = crate::SliceDataChunk::new(smallvec![0, 0, 0], &chunk_data);
         create
             .write_chunk("foo/bar", &array_meta, &chunk_in)

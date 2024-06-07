@@ -13,7 +13,7 @@ pub mod gzip;
 #[cfg(all(feature = "lz", not(feature = "lz_pure")))]
 pub mod lz;
 #[cfg(feature = "lz_pure")]
-pub(self) mod lz_pure;
+mod lz_pure;
 pub mod raw;
 #[cfg(feature = "lz_pure")]
 pub mod lz {
@@ -32,7 +32,7 @@ pub trait Compression: Default {
 /// Enumeration of known compression schemes.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "lowercase")]
-#[serde(tag = "codec", content = "configuration")]
+#[serde(untagged)]
 pub enum CompressionType {
     Raw(raw::RawCompression),
     #[cfg(feature = "blosc")]
