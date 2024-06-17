@@ -428,7 +428,7 @@ pub trait ZarrNdarrayWriter: HierarchyWriter {
                     &mut existing_chunk,
                 )?;
 
-                let (chunk_bb, mut chunk_array) = if let Some(()) = chunk_opt {
+                let (chunk_bb, mut chunk_array) = if chunk_opt.is_some() {
                     let chunk_bb = existing_chunk.get_bounds(array_meta);
                     let chunk_array = existing_chunk.into_ndarray(array_meta);
                     (chunk_bb, chunk_array)

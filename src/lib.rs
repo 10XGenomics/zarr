@@ -1,7 +1,5 @@
 //! Zarr Version 2.0 implementation.
 
-#![deny(missing_debug_implementations, unused_imports)]
-
 #[macro_use]
 pub extern crate smallvec;
 
@@ -30,8 +28,6 @@ pub use data_type::*;
 pub mod ndarray;
 
 pub mod storage;
-
-pub mod store;
 
 pub mod prelude;
 

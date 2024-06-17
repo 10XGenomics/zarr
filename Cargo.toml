@@ -14,11 +14,10 @@ keywords = ["tensor"]
 categories = ["encoding", "filesystem", "science"]
 
 [features]
-default = ["bzip", "filesystem", "gzip", "lz", "use_ndarray", "xz", "blosc"]
+default = ["bzip", "gzip", "lz", "use_ndarray", "xz", "blosc"]
 
 blosc = ["blosc-src"]
 bzip = ["bzip2"]
-filesystem = ["fs2", "walkdir"]
 gzip = ["flate2/zlib"]
 gzip_pure = ["flate2"]
 lz = ["lz4"]
@@ -40,12 +39,10 @@ thiserror = "1"
 blosc-src = { version = "0.1.1", optional = true }
 bzip2 = { version = "0.4", optional = true }
 flate2 = { version = "1.0.22", optional = true }
-fs2 = { version = "0.4", optional = true }
 itertools = { version = "^0.10", optional = true }
 lz4 = { version = "1.23", optional = true }
 lz-fear = { version = "0.1.1", optional = true }
 ndarray = { version = "^0.15", optional = true }
-walkdir = { version = "2", optional = true }
 xz2 = { version = "0.1", optional = true }
 
 [dev-dependencies]
