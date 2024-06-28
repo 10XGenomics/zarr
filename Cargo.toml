@@ -16,14 +16,14 @@ categories = ["encoding", "filesystem", "science"]
 [features]
 default = ["bzip", "gzip", "lz", "use_ndarray", "xz", "blosc"]
 
-blosc = ["blosc-src"]
-bzip = ["bzip2"]
+blosc = ["dep:blosc-src"]
+bzip = ["dep:bzip2"]
 gzip = ["flate2/zlib"]
-gzip_pure = ["flate2"]
-lz = ["lz4"]
-lz_pure = ["lz-fear"]
-use_ndarray = ["itertools", "ndarray"]
-xz = ["xz2"]
+gzip_pure = ["dep:flate2"]
+lz = ["dep:lz4", "blosc-src/lz4"]
+lz_pure = ["dep:lz-fear"]
+use_ndarray = ["dep:itertools", "dep:ndarray"]
+xz = ["dep:xz2"]
 
 [dependencies]
 anyhow = "1.0"
@@ -36,7 +36,7 @@ serde_json = "1.0"
 smallvec = { version = "1", features = ["serde"] }
 thiserror = "1"
 
-blosc-src = { version = "0.1.1", optional = true }
+blosc-src = { version = "0.3.0", optional = true, features = ["zstd"] }
 bzip2 = { version = "0.4", optional = true }
 flate2 = { version = "1.0.22", optional = true }
 itertools = { version = "^0.10", optional = true }
