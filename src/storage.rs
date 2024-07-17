@@ -1,34 +1,54 @@
 use std::io::{Error, ErrorKind, Read, Write};
 
-use semver::VersionReq;
-use serde_json::Value;
+use camino::Utf8PathBuf;
 
 use crate::{
     canonicalize_path,
     chunk::{DataChunk, ReadableDataChunk, ReinitDataChunk, VecDataChunk, WriteableDataChunk},
     ArrayMetadata, GridCoord, GroupMetadata, Hierarchy, HierarchyLister, HierarchyReader,
-    HierarchyWriter, JsonObject, MetadataError, ReflectedType, StoreNodeMetadata,
+    HierarchyWriter, JsonObject, ReflectedType, StoreNodeMetadata,
 };
 
+/// A trait for a Zarr store that can be read.
 pub trait ReadableStore {
+    /// The store reader type.
     type GetReader: Read;
 
-    /// TODO: not in zarr spec
+    /// Returns `true` if an item with the given `key` is present in the store.
+    ///
+    /// # Errors
+    ///
+    /// A call to `exists` may return an I/O error indicating the operation could not be completed.
     fn exists(&self, key: &str) -> Result<bool, Error>;
 
+    /// Retreive the item in the store with the given `key`, if it exists.
+    ///
+    /// # Errors
+    ///
+    /// A call to `get` may return an I/O error indicating the operation could not be completed.
     fn get(&self, key: &str) -> Result<Option<Self::GetReader>, Error>;
 
     /// TODO: not in zarr spec
     fn uri(&self, key: &str) -> Result<String, Error>;
 }
 
+/// A trait for a Zarr store that can list each node.
 pub trait ListableStore {
     /// Retrieve all keys in the store.
+    ///
+    /// # Errors
+    ///
+    /// A call to `list` may return an I/O error indicating the operation could not be completed.
     fn list(&self) -> Result<Vec<String>, Error> {
         self.list_prefix("/")
     }
 
     /// Retrieve all keys with a given prefix.
+    ///
+    /// # Errors
+    ///
+    /// A call to `list_prefix` may return an I/O error indicating the operation could not be
+    /// completed.
     fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, Error> {
         let mut to_visit = vec![prefix.to_owned()];
         let mut result = vec![];
@@ -44,133 +64,121 @@ pub trait ListableStore {
 
     /// Retrieve all keys and prefixes with a given prefix and which do not
     /// contain the character “/” after the given prefix.
+    ///
+    /// # Errors
+    ///
+    /// A call to `list_dir` may return an I/O error indicating the operation could not be
+    /// completed.
     fn list_dir(&self, prefix: &str) -> Result<(Vec<String>, Vec<String>), Error>;
 }
 
+/// A trait for a Zarr store that can write new data.
 pub trait WriteableStore {
+    /// The store writer.
     type SetWriter: Write;
 
+    /// Write a value to the Zarr store with the given `key` using a function `value` that yields
+    /// the item.
+    ///
+    /// # Errors
+    ///
+    /// A call to `set` may return an I/O error indicating the operation could not be completed.
     fn set<F: FnOnce(Self::SetWriter) -> Result<(), Error>>(
         &self,
         key: &str,
         value: F,
     ) -> Result<(), Error>;
 
-    // TODO differs from spec in that it returns a bool indicating existence of the key at the end of the operation.
+    /// Erase an item from the Zarr store.
+    ///
+    /// # Errors
+    ///
+    /// A call to `erase` may return an I/O error indicating the operation could not be completed.
     fn erase(&self, key: &str) -> Result<bool, Error>;
 
-    // TODO
+    /// Erase all items from the array store with a `key` containing the given `key_prefix`.
+    ///
+    /// # Errors
+    ///
+    /// A call to `erase_prefix` may return an I/O error indicating the operation could not be
+    /// completed.
     fn erase_prefix(&self, key_prefix: &str) -> Result<bool, Error>;
 }
 
-/// TODO
+/// Returns the chunk key of an array chunk at the given grid position.
+///
+/// # Examples
 ///
 /// ```
 /// use zarr::prelude::*;
-/// use zarr::storage::get_chunk_key;
 /// use zarr::smallvec::smallvec;
-/// let meta = ArrayMetadata::new(
-///     smallvec![50, 40, 30],
-///     smallvec![11, 10, 10],
-///     i8::ZARR_TYPE,
-///     zarr::compression::CompressionType::default(),
-/// );
-/// assert_eq!(get_chunk_key("/foo/baz", &meta, &[0, 0, 0]), "/data/root/foo/baz/c0/0/0");
-/// assert_eq!(get_chunk_key("/foo/baz", &meta, &[1, 2, 3]), "/data/root/foo/baz/c1/2/3");
-///
-/// let meta = ArrayMetadata::new(
-///     smallvec![],
-///     smallvec![],
-///     i8::ZARR_TYPE,
-///     zarr::compression::CompressionType::default(),
-/// );
-/// assert_eq!(get_chunk_key("/foo/baz", &meta, &[]), "/data/root/foo/baz/c");
+/// use zarr::storage::get_chunk_key;
+/// // Metadata for an array of shape (100, 4, 4) and chunk sizes of (100, 2, 2)
+/// let meta = ArrayMetadataBuilder::default()
+///     .shape(smallvec![100, 4, 4])
+///     .chunks(smallvec![100, 2, 2])
+///     .dtype(i8::ZARR_TYPE)
+///     .compressor(zarr::compression::CompressionType::default())
+///     .build()
+///     .unwrap();
+/// assert_eq!(get_chunk_key("/foo/baz", &meta, &[0, 0, 0]), "foo/baz/0.0.0");
+/// assert_eq!(get_chunk_key("/foo/baz", &meta, &[0, 1, 0]), "foo/baz/0.1.0");
+/// assert_eq!(get_chunk_key("/foo/baz", &meta, &[0, 0, 1]), "foo/baz/0.0.1");
+/// assert_eq!(get_chunk_key("/foo/baz", &meta, &[0, 1, 1]), "foo/baz/0.1.1");
 /// ```
-pub fn get_chunk_key(base_path: &str, array_meta: &ArrayMetadata, grid_position: &[u64]) -> String {
+#[must_use]
+pub fn get_chunk_key(key: &str, array_meta: &ArrayMetadata, grid_position: &[u64]) -> String {
     use std::fmt::Write;
     // TODO: normalize relative or absolute paths
-    let canon_path = canonicalize_path(base_path);
-    let mut chunk_key = if canon_path.is_empty() {
-        format!("{}/c", crate::DATA_ROOT_PATH,)
-    } else {
-        format!("{}/{}/c", crate::DATA_ROOT_PATH, canon_path)
-    };
+    let mut chunk_key = format!("{}/", canonicalize_path(key));
 
     for (i, coord) in grid_position.iter().enumerate() {
-        write!(chunk_key, "{}", coord).unwrap();
+        write!(chunk_key, "{coord}").unwrap();
         if i < grid_position.len() - 1 {
-            chunk_key.push_str(&array_meta.chunk_grid.separator)
+            chunk_key.push_str(array_meta.dimension_separator());
         }
     }
 
     chunk_key
 }
 
-const ATTRIBUTES_NAME: &str = "attributes";
-
-fn merge_top_level(a: &mut Value, b: JsonObject) {
-    match a {
-        &mut Value::Object(ref mut a) => {
-            for (k, v) in b {
-                a.insert(k, v);
-            }
-        }
-        a => {
-            *a = b.into();
-        }
+fn merge_top_level(a: &mut JsonObject, b: JsonObject) {
+    for (k, v) in b {
+        a.insert(k, v);
     }
 }
 
 impl<S: ReadableStore + Hierarchy> HierarchyReader for S {
-    fn get_version(&self) -> Result<VersionReq, Error> {
-        let vers_str = self
-            .get_entry_point_metadata()
-            .zarr_format
-            .rsplit('/')
-            .next()
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::InvalidData,
-                    "Entry point metadata zarr format URI does not have version",
-                )
-            })?;
-        VersionReq::parse(vers_str).map_err(|_| {
-            Error::new(
-                ErrorKind::InvalidData,
-                "Entry point metadata zarr format URI does not have version",
-            )
-        })
-    }
-
     fn get_array_metadata(&self, path_name: &str) -> Result<ArrayMetadata, Error> {
         let array_path = self.array_metadata_key(path_name);
-        let value_reader = ReadableStore::get(self, &array_path.to_str().expect("TODO"))?
+        let value_reader = ReadableStore::get(self, array_path.as_str())?
             .ok_or_else(|| Error::from(ErrorKind::NotFound))?;
         let metadata: ArrayMetadata = serde_json::from_reader(value_reader)?;
-        // TODO: erring immediately when encountering unknown extensions, while
-        // it may be more appropriate to do so only when doing chunk IO.
-        if let Some(ext) = metadata.extensions.iter().find(|e| e.must_understand) {
-            // TODO: returning an io::Error wrapped custom error, rather than other
-            // way around.
-            return Err(MetadataError::UnknownRequiredExtension(ext.clone()).into());
-        }
         Ok(metadata)
+    }
+
+    fn get_attributes(&self, path_name: &str) -> Result<Option<JsonObject>, Error> {
+        let key = self.attrs_metadata_key(path_name);
+
+        if let Some(rdr) = self.get(key.as_str())? {
+            let attrs: JsonObject = serde_json::from_reader(rdr)?;
+            Ok(Some(attrs))
+        } else {
+            Ok(None)
+        }
     }
 
     fn exists(&self, path_name: &str) -> Result<bool, Error> {
         // TODO: needless path allocs
         // TODO: should follow spec more closely by using `list_dir` for implicit groups.
-        Ok(
-            self.exists(self.array_metadata_key(path_name).to_str().expect("TODO"))?
-                || self.exists(self.group_metadata_key(path_name).to_str().expect("TODO"))?
-                || self.exists(
-                    self.group_metadata_key(path_name)
-                        .with_extension("")
-                        .with_extension("")
-                        .to_str()
-                        .expect("TODO"),
-                )?,
-        )
+        Ok(self.exists(self.array_metadata_key(path_name).as_str())?
+            || self.exists(self.group_metadata_key(path_name).as_str())?
+            || self.exists(
+                self.group_metadata_key(path_name)
+                    .with_extension("")
+                    .with_extension("")
+                    .as_str(),
+            )?)
     }
 
     fn get_chunk_uri(
@@ -179,7 +187,7 @@ impl<S: ReadableStore + Hierarchy> HierarchyReader for S {
         array_meta: &ArrayMetadata,
         grid_position: &[u64],
     ) -> Result<String, Error> {
-        let chunk_key = get_chunk_key(path_name, array_meta, &grid_position);
+        let chunk_key = get_chunk_key(path_name, array_meta, grid_position);
         self.uri(&chunk_key)
     }
 
@@ -254,54 +262,16 @@ impl<S: ReadableStore + Hierarchy> HierarchyReader for S {
     ) -> Result<Option<StoreNodeMetadata>, Error> {
         todo!()
     }
-
-    fn list_attributes(&self, path_name: &str) -> Result<JsonObject, Error> {
-        // TODO: wasteful path recomputation
-        let metadata_key =
-            if self.exists(self.array_metadata_key(path_name).to_str().expect("TODO"))? {
-                self.array_metadata_key(path_name)
-            } else if self.exists(self.group_metadata_key(path_name).to_str().expect("TODO"))? {
-                self.group_metadata_key(path_name)
-            } else {
-                return Err(Error::new(
-                    ErrorKind::NotFound,
-                    "Node does not exist at path",
-                ));
-            };
-
-        // TODO: determine proper missing behavior for implicit groups.
-        // For now return an error.
-        let value_reader = ReadableStore::get(self, &metadata_key.to_str().expect("TODO"))?
-            .ok_or_else(|| Error::from(ErrorKind::NotFound))?;
-        let mut value: Value = serde_json::from_reader(value_reader)?;
-        let attrs = match value
-            .as_object_mut()
-            .and_then(|o| o.remove(ATTRIBUTES_NAME))
-        {
-            Some(Value::Object(map)) => map,
-            Some(v) => return Err(MetadataError::UnexpectedType(v).into()),
-            _ => JsonObject::new(),
-        };
-        Ok(attrs)
-    }
 }
 
 impl<S: ListableStore + Hierarchy> HierarchyLister for S {
     fn list_nodes(&self, prefix_path: &str) -> Result<Vec<String>, Error> {
         // TODO: Inelegant.
 
-        let key_prefix = format!(
-            "{}/{}",
-            crate::META_ROOT_PATH,
-            canonicalize_path(prefix_path)
-        );
-        let (mut keys, mut prefixes) = self.list_dir(&key_prefix)?;
+        let key_prefix = canonicalize_path(prefix_path);
+        let (mut keys, mut prefixes) = self.list_dir(key_prefix)?;
 
         // Find array and group metadata keys.
-        keys.retain(|k| k.ends_with(&self.get_entry_point_metadata().metadata_key_suffix));
-        keys.iter_mut().for_each(|k| {
-            k.truncate(k.len() - self.get_entry_point_metadata().metadata_key_suffix.len())
-        });
         keys.retain(|k| {
             k.ends_with(&crate::ARRAY_METADATA_KEY_EXT)
                 || k.ends_with(&crate::GROUP_METADATA_KEY_EXT)
@@ -311,27 +281,20 @@ impl<S: ListableStore + Hierarchy> HierarchyLister for S {
             crate::GROUP_METADATA_KEY_EXT.len()
         );
 
-        // Remove metadata extensions from keys to partially convert to node paths.
-        let suffix_len = self.get_entry_point_metadata().metadata_key_suffix.len()
-            + crate::ARRAY_METADATA_KEY_EXT.len()
-            + 1;
-        keys.iter_mut()
-            .for_each(|k| k.truncate(k.len() - suffix_len));
-
         // Add potential implicit groups.
         prefixes
             .iter_mut()
             .for_each(|p| p.truncate(p.trim_end_matches('/').len()));
-        keys.extend(prefixes.drain(..));
+        keys.append(&mut prefixes);
 
         // Remove duplicates.
         keys.sort();
         keys.dedup();
 
         // Remove key prefix to convert to node path.
-        keys.iter_mut().for_each(|k| {
+        for k in &mut keys {
             k.drain(..key_prefix.len());
-        });
+        }
 
         Ok(keys)
     }
@@ -344,33 +307,28 @@ impl<S: ReadableStore + WriteableStore + Hierarchy> HierarchyWriter for S {
         attributes: JsonObject,
     ) -> Result<(), Error> {
         // TODO: wasteful path recomputation
-        let metadata_key =
-            if self.exists(self.array_metadata_key(path_name).to_str().expect("TODO"))? {
-                self.array_metadata_key(path_name)
-            } else if self.exists(self.group_metadata_key(path_name).to_str().expect("TODO"))? {
-                self.group_metadata_key(path_name)
-            } else {
-                return Err(Error::new(
-                    ErrorKind::NotFound,
-                    "Node does not exist at path",
-                ));
-            };
+        let attrs_metadata_key = self.attrs_metadata_key(path_name);
+        let attrs_metadata_key_str = attrs_metadata_key.as_str();
 
-        // TODO: race condition
-        let value_reader = ReadableStore::get(self, &metadata_key.to_str().expect("TODO"))?
-            .ok_or_else(|| Error::from(ErrorKind::NotFound))?;
-        let existing: JsonObject = serde_json::from_reader(value_reader)?;
+        let existing = if self.exists(attrs_metadata_key_str)? {
+            let value_reader = ReadableStore::get(self, attrs_metadata_key_str)?
+                .ok_or_else(|| Error::from(ErrorKind::NotFound))?;
+            let existing: JsonObject = serde_json::from_reader(value_reader)?;
+            existing
+        } else {
+            let value = serde_json::Map::new();
+            self.set(attrs_metadata_key_str, |writer| {
+                Ok(serde_json::to_writer(writer, &value)?)
+            })?;
+            value
+        };
 
         // TODO: determine whether attribute merging is still necessary for zarr
         let mut merged = existing.clone();
-        match merged.get_mut(ATTRIBUTES_NAME) {
-            Some(merged_attr) => merge_top_level(merged_attr, attributes),
-            None => {
-                merged.insert(ATTRIBUTES_NAME.into(), Value::Object(attributes));
-            }
-        }
+        merge_top_level(&mut merged, attributes);
+
         if merged != existing {
-            self.set(metadata_key.to_str().expect("TODO"), |writer| {
+            self.set(attrs_metadata_key_str, |writer| {
                 Ok(serde_json::to_writer(writer, &merged)?)
             })?;
         }
@@ -378,44 +336,62 @@ impl<S: ReadableStore + WriteableStore + Hierarchy> HierarchyWriter for S {
     }
 
     fn create_group(&self, path_name: &str) -> Result<(), Error> {
-        // Because of implicit hierarchy rules, it is not necessary to create
-        // the parent group.
-        // let path_buf = PathBuf::from(path_name);
-        // if let Some(parent) = path_buf.parent() {
-        //     self.create_group(parent.to_str().expect("TODO"))?;
-        // }
+        // Walk through the parents of paths of the group and ensure that all ancestors have
+        // `.zgroup` files. If they don't, create a group.
+        let path = Utf8PathBuf::from(path_name);
+        let mut ancestors = path.ancestors();
+        // The first ancestor is always equal to the original path. We don't want to create the
+        // group at this path yet.
+        ancestors.next();
+
+        for parent in ancestors {
+            let parent_group_key = self.group_metadata_key(parent.as_str());
+            if !self.exists(parent_group_key.as_str())? {
+                self.create_group(parent.as_str())?;
+            }
+        }
+
         let metadata_key = self.group_metadata_key(path_name);
-        if self.exists(self.array_metadata_key(path_name).to_str().expect("TODO"))? {
+        if self.exists(self.array_metadata_key(path_name).as_str())? {
             Err(Error::new(
                 ErrorKind::AlreadyExists,
                 "Array already exists at group path",
             ))
-        } else if self.exists(metadata_key.to_str().expect("TODO"))? {
+        } else if self.exists(metadata_key.as_str())? {
             Ok(())
         } else {
-            self.set(metadata_key.to_str().expect("TODO"), |writer| {
+            self.set(metadata_key.as_str(), |writer| {
                 Ok(serde_json::to_writer(writer, &GroupMetadata::default())?)
             })
         }
     }
 
     fn create_array(&self, path_name: &str, array_meta: &ArrayMetadata) -> Result<(), Error> {
-        // Because of implicit hierarchy rules, it is not necessary to create
-        // the parent group.
-        // let path_buf = PathBuf::from(path_name);
-        // if let Some(parent) = path_buf.parent() {
-        //     self.create_group(parent.to_str().expect("TODO"))?;
-        // }
+        // Walk through the parents of paths of the array and ensure that all ancestors have
+        // `.zgroup` files. If they don't, create a group.
+        let path = Utf8PathBuf::from(path_name);
+        let mut ancestors = path.ancestors();
+        // The first ancestor is always equal to the original path. We don't want to create the
+        // group at this path.
+        ancestors.next();
+
+        for parent in ancestors {
+            let parent_group_key = self.group_metadata_key(parent.as_str());
+            if !self.exists(parent_group_key.as_str())? {
+                self.create_group(parent.as_str())?;
+            }
+        }
+
         let metadata_key = self.array_metadata_key(path_name);
-        if self.exists(self.group_metadata_key(path_name).to_str().expect("TODO"))?
-            || self.exists(metadata_key.to_str().expect("TODO"))?
+        if self.exists(self.group_metadata_key(path_name).as_str())?
+            || self.exists(metadata_key.as_str())?
         {
             Err(Error::new(
                 ErrorKind::AlreadyExists,
                 "Node already exists at array path",
             ))
         } else {
-            self.set(metadata_key.to_str().expect("TODO"), |writer| {
+            self.set(metadata_key.as_str(), |writer| {
                 Ok(serde_json::to_writer(writer, array_meta)?)
             })
         }
@@ -424,12 +400,12 @@ impl<S: ReadableStore + WriteableStore + Hierarchy> HierarchyWriter for S {
     fn remove(&self, path_name: &str) -> Result<(), Error> {
         // TODO: needless allocs
         let metadata_key = self.group_metadata_key(path_name);
-        self.erase(metadata_key.to_str().expect("TODO"))?;
+        self.erase(metadata_key.as_str())?;
         let mut metadata_key = self.array_metadata_key(path_name);
-        self.erase(metadata_key.to_str().expect("TODO"))?;
+        self.erase(metadata_key.as_str())?;
         metadata_key.set_extension("");
         metadata_key.set_extension("");
-        self.erase_prefix(self.data_path_key(path_name).to_str().expect("TODO"))?;
+        self.erase_prefix(self.data_path_key(path_name).as_str())?;
         Ok(())
     }
 
@@ -441,7 +417,7 @@ impl<S: ReadableStore + WriteableStore + Hierarchy> HierarchyWriter for S {
     ) -> Result<(), Error> {
         // TODO convert assert
         // assert!(array_meta.in_bounds(chunk.get_grid_position()));
-        let chunk_key = get_chunk_key(path_name, array_meta, chunk.get_grid_position());
+        let chunk_key = get_chunk_key(path_name, array_meta, chunk.grid_position());
         self.set(&chunk_key, |writer| {
             <crate::chunk::DefaultChunk as crate::chunk::DefaultChunkWriter<T, _, _>>::write_chunk(
                 writer, array_meta, chunk,

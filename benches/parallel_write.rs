@@ -10,28 +10,15 @@
 //! Note that since this uses the default cargo bencher, even though each
 //! iteration only takes seconds they will run hundreds of times. Hence this
 //! will take several hours to run.
-#![feature(test)]
-
-extern crate test;
 
 use std::fs::File;
 use std::io::BufReader;
 
-use futures::{
-    self,
-    Future,
-};
-use futures_cpupool::{
-    CpuFuture,
-    CpuPool,
-};
+use criterion::{black_box, criterion_group, criterion_main, Bencher, BenchmarkId, Criterion};
+use futures::{self, Future};
+use futures_cpupool::{CpuFuture, CpuPool};
 use lazy_static::lazy_static;
-use tempdir;
-use test::Bencher;
-use tiff::decoder::{
-    Decoder,
-    DecodingResult,
-};
+use tiff::decoder::{Decoder, DecodingResult};
 
 use zarr::chunk::WriteableDataChunk;
 use zarr::prelude::*;
@@ -78,11 +65,7 @@ where
         compression.clone(),
     );
 
-    let path_name = format!(
-        "array.{:?}.{}",
-        array_meta.get_data_type(),
-        array_meta.get_compressor()
-    );
+    let path_name = format!("array.{:?}.{}", array_meta.dtype(), array_meta.compressor());
 
     n.create_array(&path_name, &array_meta)
         .expect("Failed to create array");
@@ -139,61 +122,73 @@ where
         .map(|&v| T::from(v))
         .collect::<Vec<T>>();
 
-    b.iter(|| write(&n, &compression, &chunk_data, pool_size));
+    b.iter(|| {
+        write(
+            black_box(&n),
+            black_box(&compression),
+            black_box(&chunk_data),
+            black_box(pool_size),
+        )
+    });
 
-    b.bytes = (CHUNK_DIM * CHUNK_DIM * CHUNK_DIM) as u64
-        * (N_CHUNKS * N_CHUNKS * N_CHUNKS) as u64
-        * std::mem::size_of::<T>() as u64;
+    // b.bytes = (CHUNK_DIM * CHUNK_DIM * CHUNK_DIM) as u64
+    //     * (N_CHUNKS * N_CHUNKS * N_CHUNKS) as u64
+    //     * std::mem::size_of::<T>() as u64;
 }
 
-// 1 Thread. Can't macro this because of the concat_idents! limitation.
-#[bench]
-fn bench_write_i16_raw_1(b: &mut Bencher) {
-    bench_write_dtype_compression::<i16, compression::raw::RawCompression>(b, 1);
+pub fn parallel(c: &mut Criterion) {
+    let mut group = c.benchmark_group("i16/raw");
+    for threads in [1, 2] {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(threads),
+            &threads,
+            |b, &threads| {
+                bench_write_dtype_compression::<i16, compression::raw::RawCompression>(b, threads);
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::from_parameter(threads),
+            &threads,
+            |b, &threads| {
+                bench_write_dtype_compression::<i16, compression::bzip::Bzip2Compression>(
+                    b, threads,
+                );
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::from_parameter(threads),
+            &threads,
+            |b, &threads| {
+                bench_write_dtype_compression::<i16, compression::gzip::GzipCompression>(
+                    b, threads,
+                );
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::from_parameter(threads),
+            &threads,
+            |b, &threads| {
+                bench_write_dtype_compression::<i16, compression::xz::XzCompression>(b, threads);
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::from_parameter(threads),
+            &threads,
+            |b, &threads| {
+                bench_write_dtype_compression::<i16, compression::lz::Lz4Compression>(b, threads);
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::from_parameter(threads),
+            &threads,
+            |b, &threads| {
+                bench_write_dtype_compression::<i16, compression::blosc::BloscCompression>(
+                    b, threads,
+                );
+            },
+        );
+    }
 }
 
-#[bench]
-fn bench_write_i16_bzip2_1(b: &mut Bencher) {
-    bench_write_dtype_compression::<i16, compression::bzip::Bzip2Compression>(b, 1);
-}
-
-#[bench]
-fn bench_write_i16_gzip_1(b: &mut Bencher) {
-    bench_write_dtype_compression::<i16, compression::gzip::GzipCompression>(b, 1);
-}
-
-#[bench]
-fn bench_write_i16_xz_1(b: &mut Bencher) {
-    bench_write_dtype_compression::<i16, compression::xz::XzCompression>(b, 1);
-}
-
-#[bench]
-fn bench_write_i16_lz4_1(b: &mut Bencher) {
-    bench_write_dtype_compression::<i16, compression::lz::Lz4Compression>(b, 1);
-}
-
-// 2 Threads.
-#[bench]
-fn bench_write_i16_raw_2(b: &mut Bencher) {
-    bench_write_dtype_compression::<i16, compression::raw::RawCompression>(b, 2);
-}
-
-#[bench]
-fn bench_write_i16_bzip2_2(b: &mut Bencher) {
-    bench_write_dtype_compression::<i16, compression::bzip::Bzip2Compression>(b, 2);
-}
-
-#[bench]
-fn bench_write_i16_gzip_2(b: &mut Bencher) {
-    bench_write_dtype_compression::<i16, compression::gzip::GzipCompression>(b, 2);
-}
-
-#[bench]
-fn bench_write_i16_xz_2(b: &mut Bencher) {
-    bench_write_dtype_compression::<i16, compression::xz::XzCompression>(b, 2);
-}
-
-#[bench]
-fn bench_write_i16_lz4_2(b: &mut Bencher) {
-    bench_write_dtype_compression::<i16, compression::lz::Lz4Compression>(b, 2);
-}
+criterion_group!(benches, parallel);
+criterion_main!(benches);

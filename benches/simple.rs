@@ -1,20 +1,11 @@
 //! # Simple In-memory Read/Write Benchmarks
-#![feature(test)]
 
-extern crate test;
+use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
 
-use rand::{
-    distributions::Standard,
-    Rng,
-};
-use test::Bencher;
+use rand::{distributions::Standard, Rng};
 
 use zarr::chunk::{
-    DefaultChunk,
-    DefaultChunkReader,
-    DefaultChunkWriter,
-    ReadableDataChunk,
-    WriteableDataChunk,
+    DefaultChunk, DefaultChunkReader, DefaultChunkWriter, ReadableDataChunk, WriteableDataChunk,
 };
 use zarr::prelude::*;
 use zarr::smallvec::smallvec;
@@ -31,7 +22,7 @@ where
         T::ZARR_TYPE,
         compression,
     );
-    let numel = array_meta.get_chunk_num_elements();
+    let numel = array_meta.chunk_num_elements();
     let rng = rand::thread_rng();
     let chunk_data: Vec<T> = rng.sample_iter(&Standard).take(numel).collect();
 
@@ -39,41 +30,41 @@ where
 
     let mut inner: Vec<u8> = Vec::new();
 
+    // let mut group = b.benchmark_group(group_name);
+    // let size = (array_meta.chunk_num_elements() * array_meta.dtype().size_of()) as u64;
+    // group.throughput(Throughput::Bytes(size));
+
     b.iter(|| {
-        DefaultChunk::write_chunk(&mut inner, &array_meta, &chunk_in).expect("write_chunk failed");
+        DefaultChunk::write_chunk(
+            black_box(&mut inner),
+            black_box(&array_meta),
+            black_box(&chunk_in),
+        )
+        .expect("write_chunk failed");
 
         let _chunk_out = <DefaultChunk as DefaultChunkReader<T, _>>::read_chunk(
-            &inner[..],
-            &array_meta,
-            smallvec![0, 0, 0],
+            black_box(&inner[..]),
+            black_box(&array_meta),
+            black_box(smallvec![0, 0, 0]),
         )
         .expect("read_chunk failed");
     });
-
-    b.bytes = (array_meta.get_chunk_num_elements()
-        * array_meta
-            .get_data_type()
-            .effective_type()
-            .unwrap()
-            .size_of()) as u64;
 }
 
-#[bench]
-fn simple_rw_i8_raw(b: &mut Bencher) {
-    test_chunk_compression_rw::<i8>(compression::raw::RawCompression.into(), b);
+pub fn simple(c: &mut Criterion) {
+    c.bench_function("read/write i8 raw", |b| {
+        test_chunk_compression_rw::<i8>(compression::raw::RawCompression.into(), b);
+    });
+    c.bench_function("read/write i16 raw", |b| {
+        test_chunk_compression_rw::<i16>(compression::raw::RawCompression.into(), b);
+    });
+    c.bench_function("read/write i32 raw", |b| {
+        test_chunk_compression_rw::<i32>(compression::raw::RawCompression.into(), b);
+    });
+    c.bench_function("read/write i64 raw", |b| {
+        test_chunk_compression_rw::<i64>(compression::raw::RawCompression.into(), b);
+    });
 }
 
-#[bench]
-fn simple_rw_i16_raw(b: &mut Bencher) {
-    test_chunk_compression_rw::<i16>(compression::raw::RawCompression.into(), b);
-}
-
-#[bench]
-fn simple_rw_i32_raw(b: &mut Bencher) {
-    test_chunk_compression_rw::<i32>(compression::raw::RawCompression.into(), b);
-}
-
-#[bench]
-fn simple_rw_i64_raw(b: &mut Bencher) {
-    test_chunk_compression_rw::<i64>(compression::raw::RawCompression.into(), b);
-}
+criterion_group!(benches, simple);
+criterion_main!(benches);
