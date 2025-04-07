@@ -37,7 +37,7 @@ smallvec = { version = "1", features = ["serde"] }
 thiserror = "1"
 
 blosc-src = { version = "0.3.0", optional = true, features = ["zstd"] }
-bzip2 = { version = "0.4", optional = true }
+bzip2 = { version = "0.5", optional = true }
 flate2 = { version = "1.0.22", optional = true }
 itertools = { version = "^0.10", optional = true }
 lz4 = { version = "1.23", optional = true }
