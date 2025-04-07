@@ -2,7 +2,8 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
 
-use rand::{distributions::Standard, Rng};
+use rand::Rng;
+use rand_distr::{Distribution, StandardUniform};
 
 use zarr::chunk::{
     DefaultChunk, DefaultChunkReader, DefaultChunkWriter, ReadableDataChunk, WriteableDataChunk,
@@ -13,8 +14,8 @@ use zarr::smallvec::smallvec;
 fn test_chunk_compression_rw<T>(compression: compression::CompressionType, b: &mut Bencher)
 where
     T: 'static + std::fmt::Debug + ReflectedType + PartialEq + Default,
-    rand::distributions::Standard: rand::distributions::Distribution<T>,
     VecDataChunk<T>: ReadableDataChunk + WriteableDataChunk,
+    StandardUniform: Distribution<T>,
 {
     let array_meta = ArrayMetadata::new(
         smallvec![1024, 1024, 1024],
@@ -23,8 +24,8 @@ where
         compression,
     );
     let numel = array_meta.chunk_num_elements();
-    let rng = rand::thread_rng();
-    let chunk_data: Vec<T> = rng.sample_iter(&Standard).take(numel).collect();
+    let rng = rand::rng();
+    let chunk_data: Vec<T> = rng.sample_iter(&StandardUniform).take(numel).collect();
 
     let chunk_in = VecDataChunk::new(smallvec![0, 0, 0], chunk_data.clone());
 
@@ -63,6 +64,16 @@ pub fn simple(c: &mut Criterion) {
     });
     c.bench_function("read/write i64 raw", |b| {
         test_chunk_compression_rw::<i64>(compression::raw::RawCompression.into(), b);
+    });
+
+    c.bench_function("read/write f16 raw", |b| {
+        test_chunk_compression_rw::<half::f16>(compression::raw::RawCompression.into(), b);
+    });
+    c.bench_function("read/write f32 raw", |b| {
+        test_chunk_compression_rw::<f32>(compression::raw::RawCompression.into(), b);
+    });
+    c.bench_function("read/write f64 raw", |b| {
+        test_chunk_compression_rw::<f64>(compression::raw::RawCompression.into(), b);
     });
 }
 
