@@ -21,7 +21,6 @@ bzip = ["dep:bzip2"]
 gzip = ["flate2/zlib"]
 gzip_pure = ["dep:flate2"]
 lz = ["dep:lz4", "blosc-src/lz4"]
-lz_pure = ["dep:lz-fear"]
 use_ndarray = ["dep:itertools", "dep:ndarray"]
 xz = ["dep:xz2"]
 
@@ -29,33 +28,27 @@ xz = ["dep:xz2"]
 anyhow = "1.0"
 byteorder = "1.3.4"
 camino = "1.1"
-half = { version = "1.6", features = ["serde", "std"] }
+half = { version = "2.5", features = ["serde", "std", "rand_distr"] }
 semver = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smallvec = { version = "1", features = ["serde"] }
-thiserror = "1"
+thiserror = "2"
 
 blosc-src = { version = "0.3.0", optional = true, features = ["zstd"] }
-bzip2 = { version = "0.4", optional = true }
+bzip2 = { version = "0.5", optional = true }
 flate2 = { version = "1.0.22", optional = true }
-itertools = { version = "^0.10", optional = true }
+itertools = { version = "^0.11", optional = true }
 lz4 = { version = "1.23", optional = true }
-lz-fear = { version = "0.1.1", optional = true }
-ndarray = { version = "^0.15", optional = true }
+ndarray = { version = "=0.15.6", optional = true }
 xz2 = { version = "0.1", optional = true }
 
 [dev-dependencies]
 criterion = "0.5"
 bencher = "0.1.5"
-doc-comment = "0.3"
-futures = "0.1"
-futures-cpupool = "0.1.8"
-lazy_static = "1.4"
-rand = "0.7"
-rayon = "1"
-tempdir = "0.3"
-tiff = "0.3"
+rand = "0.9"
+rand_distr = "0.5"
+tempfile = "3"
 
 
 [profile.release]
@@ -67,7 +60,3 @@ lto = true
 [[bench]]
 harness = false
 name = "simple"
-
-[[bench]]
-harness = false
-name = "parallel_write"
