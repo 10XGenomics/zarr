@@ -2,7 +2,7 @@ use std::io::{Error, ErrorKind};
 use std::ops::Sub;
 
 use itertools::Itertools;
-use ndarray::{Array, ArrayView, Dim, IxDyn, IxDynImpl, ShapeBuilder, SliceInfo};
+use ndarray::{Array, ArrayView, IxDyn, ShapeBuilder, SliceInfo};
 
 use crate::{
     ArrayMetadata, ChunkCoord, CoordVec, DataChunk, GridCoord, HierarchyReader, HierarchyWriter,
@@ -10,6 +10,7 @@ use crate::{
     WriteableDataChunk,
 };
 
+/// Convenience re-export of commonly used types and traits.
 pub mod prelude {
     pub use super::{BoundingBox, ZarrNdarrayReader, ZarrNdarrayWriter};
 }
@@ -17,25 +18,63 @@ pub mod prelude {
 /// Specifes the extents of an axis-aligned bounding box.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BoundingBox {
+    /// The shift of this chunk with respect to the grid origin.
     offset: GridCoord,
+    /// The shape of chunk of an array.
     shape: GridCoord,
 }
 
 impl BoundingBox {
+    /// Create a new [`BoundingBox`] with a given `offset` and `shape`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic the `offset` and `shape` do not have equal lengths.
+    #[must_use]
     pub fn new(offset: GridCoord, shape: GridCoord) -> BoundingBox {
         assert_eq!(offset.len(), shape.len());
 
         BoundingBox { offset, shape }
     }
 
+    /// Returns the shape of a chunk.
+    #[must_use]
     pub fn shape_chunk(&self) -> ChunkCoord {
         self.shape.iter().map(|n| *n as u32).collect()
     }
 
+    /// Returns the shape usable with [`ndarray`].
+    #[must_use]
     pub fn shape_ndarray_shape(&self) -> CoordVec<usize> {
         self.shape.iter().map(|n| *n as usize).collect()
     }
 
+    /// Intersect this [`BoundingBox`] with another.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the lenghts of the offset arrays aren't equal.
+    ///
+    /// # Examples
+    ///
+    /// Intersect two bounding boxes, A and B, of shape (5,8) and (5,3) and offsets (0,0) and
+    /// (3,3), respectively. Graphically, these look like:
+    ///
+    /// ```text
+    /// 8 ┌─A───────┐
+    /// 7 │         │
+    /// 6 │         │
+    /// 5 │     ╔═══╗─────┐
+    /// 4 │     ║╳╳╳║     │
+    /// 3 │     ╚═══╝───B─┘
+    /// 2 │         │
+    /// 1 │         │
+    /// 0 └─────────┘
+    ///   0 1 2 3 4 5 6 7 8
+    /// ```
+    ///
+    /// And in code
+    ///
     /// ```
     /// # use zarr::ndarray::BoundingBox;
     /// # use zarr::smallvec::smallvec;
@@ -60,6 +99,32 @@ impl BoundingBox {
             });
     }
 
+    /// Replace this [`BoundingBox`] with the result of a union with `other`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the lenghts of the offset arrays aren't equal.
+    ///
+    /// # Examples
+    ///
+    /// Union two bounding boxes, A and B, of shapes (5,8) and (5,3) and offsets (0,0) and (3,3),
+    /// respectively. Graphically, these look like:
+    ///
+    /// ```text
+    /// 8 ╔════A════╤═════╗
+    /// 7 ║         │     ║
+    /// 6 ║         │     ║
+    /// 5 A     ┌─B─┼─────╢
+    /// 4 ║     B   A     B
+    /// 3 ║     └───┼──B──╢
+    /// 2 ║         │     ║
+    /// 1 ║         │     ║
+    /// 0 ╚════A════╧═════╝
+    ///   0 1 2 3 4 5 6 7 8
+    /// ```
+    ///
+    /// Where the double lines show the resulting bounding box. In code:
+    ///
     /// ```
     /// # use zarr::ndarray::BoundingBox;
     /// # use zarr::smallvec::smallvec;
@@ -84,6 +149,7 @@ impl BoundingBox {
             });
     }
 
+    /// Returns in iterator over the upper bounds of the chunk indices.
     pub fn end(&self) -> impl Iterator<Item = u64> + '_ {
         self.offset
             .iter()
@@ -91,6 +157,8 @@ impl BoundingBox {
             .map(|(o, s)| o + s)
     }
 
+    /// Returns a slice of the chunk to be used with [`ndarray`].
+    #[must_use]
     pub fn to_ndarray_slice(&self) -> CoordVec<ndarray::SliceInfoElem> {
         self.offset
             .iter()
@@ -103,6 +171,8 @@ impl BoundingBox {
             .collect()
     }
 
+    /// Returns `true` if the chunk size is 0.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.shape.contains(&0)
     }
@@ -124,20 +194,27 @@ impl Sub<&GridCoord> for BoundingBox {
     }
 }
 
+/// An extension trait for a [`HierarchyReader`] that can read arrays from a store into an
+/// [`ndarray::Array`].
 pub trait ZarrNdarrayReader: HierarchyReader {
-    /// Read an arbitrary bounding box from an Zarr volume into an ndarray,
-    /// reading chunks in serial as necessary.
+    /// Read an arbitrary bounding box from an Zarr volume into an ndarray, reading chunks in
+    /// serial as necessary.
+    ///
+    /// # Errors
+    ///
+    /// A call to `read_ndarray` may return an I/O error indicating the operation could not be
+    /// completed.
     fn read_ndarray<T>(
         &self,
         path_name: &str,
         array_meta: &ArrayMetadata,
         bbox: &BoundingBox,
-    ) -> Result<Array<T, Dim<IxDynImpl>>, Error>
+    ) -> Result<Array<T, IxDyn>, Error>
     where
         VecDataChunk<T>: DataChunk<T> + ReinitDataChunk<T> + ReadableDataChunk,
         T: ReflectedType,
     {
-        let chunk_shape = match array_meta.get_chunk_memory_layout() {
+        let chunk_shape = match array_meta.order() {
             Order::ColumnMajor => bbox.shape_ndarray_shape().f(),
             Order::RowMajor => bbox.shape_ndarray_shape()[..].into_shape(),
         };
@@ -151,12 +228,17 @@ pub trait ZarrNdarrayReader: HierarchyReader {
 
     /// Read an arbitrary bounding box from an Zarr volume into an existing
     /// ndarray view, reading chunks in serial as necessary.
-    fn read_ndarray_into<'a, T>(
+    ///
+    /// # Errors
+    ///
+    /// A call to `read_ndarray_into` may return an I/O error indicating the operation could not be
+    /// completed.
+    fn read_ndarray_into<T>(
         &self,
         path_name: &str,
         array_meta: &ArrayMetadata,
         bbox: &BoundingBox,
-        arr: ndarray::ArrayViewMut<'a, T, Dim<IxDynImpl>>,
+        arr: ndarray::ArrayViewMut<'_, T, IxDyn>,
     ) -> Result<(), Error>
     where
         VecDataChunk<T>: DataChunk<T> + ReinitDataChunk<T> + ReadableDataChunk,
@@ -168,19 +250,24 @@ pub trait ZarrNdarrayReader: HierarchyReader {
     /// Read an arbitrary bounding box from an Zarr volume into an existing
     /// ndarray view, reading chunks in serial as necessary into a provided
     /// buffer.
-    fn read_ndarray_into_with_buffer<'a, T>(
+    ///
+    /// # Errors
+    ///
+    /// A call to `read_ndarray_into_with_buffer` may return an I/O error indicating the operation
+    /// could not be completed.
+    fn read_ndarray_into_with_buffer<T>(
         &self,
         path_name: &str,
         array_meta: &ArrayMetadata,
         bbox: &BoundingBox,
-        mut arr: ndarray::ArrayViewMut<'a, T, Dim<IxDynImpl>>,
+        mut arr: ndarray::ArrayViewMut<'_, T, IxDyn>,
         chunk_buff_opt: &mut Option<VecDataChunk<T>>,
     ) -> Result<(), Error>
     where
         VecDataChunk<T>: DataChunk<T> + ReinitDataChunk<T> + ReadableDataChunk,
         T: ReflectedType,
     {
-        if bbox.offset.len() != array_meta.get_ndim() || array_meta.get_ndim() != arr.ndim() {
+        if bbox.offset.len() != array_meta.ndim() || array_meta.ndim() != arr.ndim() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 "Wrong number of dimensions",
@@ -227,16 +314,24 @@ pub trait ZarrNdarrayReader: HierarchyReader {
                 let chunk_read_bb = read_bb.clone() - &chunk_bb.offset;
 
                 let arr_slice = arr_read_bb.to_ndarray_slice();
-                
+
                 let mut arr_view = unsafe {
-                    arr.slice_mut(SliceInfo::<_, IxDyn, IxDyn>::new(arr_slice).unwrap().as_ref())
+                    arr.slice_mut(
+                        SliceInfo::<_, IxDyn, IxDyn>::new(arr_slice)
+                            .unwrap()
+                            .as_ref(),
+                    )
                 };
 
                 let chunk_slice = chunk_read_bb.to_ndarray_slice();
 
                 let chunk_data = chunk.as_ndarray(array_meta);
                 let chunk_view = unsafe {
-                    chunk_data.slice(SliceInfo::<_, IxDyn, IxDyn>::new(chunk_slice).unwrap().as_ref())
+                    chunk_data.slice(
+                        SliceInfo::<_, IxDyn, IxDyn>::new(chunk_slice)
+                            .unwrap()
+                            .as_ref(),
+                    )
                 };
 
                 arr_view.assign(&chunk_view);
@@ -249,9 +344,15 @@ pub trait ZarrNdarrayReader: HierarchyReader {
 
 impl<T: HierarchyReader> ZarrNdarrayReader for T {}
 
+/// An extension trait for a [`HierarchyWriter`] that can write an [`ndarray::Array`].
 pub trait ZarrNdarrayWriter: HierarchyWriter {
     /// Write an arbitrary bounding box from an ndarray into an Zarr volume,
     /// writing chunks in serial as necessary.
+    ///
+    /// # Errors
+    ///
+    /// A call to `write_ndarray` may return an I/O error indicating the operation could not be
+    /// completed.
     fn write_ndarray<'a, T, A>(
         &self,
         path_name: &str,
@@ -263,10 +364,10 @@ pub trait ZarrNdarrayWriter: HierarchyWriter {
     where
         VecDataChunk<T>: DataChunk<T> + ReadableDataChunk + WriteableDataChunk,
         T: ReflectedType,
-        A: ndarray::AsArray<'a, T, Dim<IxDynImpl>>,
+        A: ndarray::AsArray<'a, T, IxDyn>,
     {
         let array = array.into();
-        if array.ndim() != array_meta.get_ndim() {
+        if array.ndim() != array_meta.ndim() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 "Wrong number of dimensions",
@@ -283,7 +384,7 @@ pub trait ZarrNdarrayWriter: HierarchyWriter {
 
         let extend_from_array =
             |v: &mut Vec<T>, view: ArrayView<'_, T, IxDyn>, array_meta: &ArrayMetadata| {
-                match array_meta.chunk_memory_layout {
+                match array_meta.order() {
                     Order::RowMajor => match view.as_slice() {
                         Some(s) => v.extend_from_slice(s),
                         None => v.extend(view.iter().cloned()),
@@ -301,7 +402,13 @@ pub trait ZarrNdarrayWriter: HierarchyWriter {
             let arr_bb = write_bb.clone() - &bbox.offset;
 
             let arr_slice = arr_bb.to_ndarray_slice();
-            let arr_view = unsafe {array.slice(SliceInfo::<_, IxDyn, IxDyn>::new(arr_slice).unwrap().as_ref())};
+            let arr_view = unsafe {
+                array.slice(
+                    SliceInfo::<_, IxDyn, IxDyn>::new(arr_slice)
+                        .unwrap()
+                        .as_ref(),
+                )
+            };
 
             if write_bb == nom_chunk_bb {
                 // No need to read whether there is an extant chunk if it is
@@ -321,32 +428,34 @@ pub trait ZarrNdarrayWriter: HierarchyWriter {
                     &mut existing_chunk,
                 )?;
 
-                let (chunk_bb, mut chunk_array) = match chunk_opt {
-                    Some(()) => {
-                        let chunk_bb = existing_chunk.get_bounds(array_meta);
-                        let chunk_array = existing_chunk.into_ndarray(array_meta);
-                        (chunk_bb, chunk_array)
-                    }
-                    None => {
-                        // If no chunk exists, need to write from its origin.
-                        // In Zarr this simply means the chunk must be full.
-                        let chunk_shape_usize = nom_chunk_bb.shape_ndarray_shape();
-                        existing_chunk_vec = existing_chunk.into_data();
-                        existing_chunk_vec.clear();
-                        existing_chunk_vec
-                            .resize(chunk_shape_usize.iter().product(), fill_value.clone());
+                let (chunk_bb, mut chunk_array) = if chunk_opt.is_some() {
+                    let chunk_bb = existing_chunk.get_bounds(array_meta);
+                    let chunk_array = existing_chunk.into_ndarray(array_meta);
+                    (chunk_bb, chunk_array)
+                } else {
+                    // If no chunk exists, need to write from its origin.
+                    // In Zarr this simply means the chunk must be full.
+                    let chunk_shape_usize = nom_chunk_bb.shape_ndarray_shape();
+                    existing_chunk_vec = existing_chunk.into_data();
+                    existing_chunk_vec.clear();
+                    existing_chunk_vec
+                        .resize(chunk_shape_usize.iter().product(), fill_value.clone());
 
-                        let chunk_array =
-                            Array::from_shape_vec(&chunk_shape_usize[..], existing_chunk_vec)
-                                .expect("TODO: chunk ndarray failed");
-                        (nom_chunk_bb, chunk_array)
-                    }
+                    let chunk_array =
+                        Array::from_shape_vec(&chunk_shape_usize[..], existing_chunk_vec)
+                            .expect("TODO: chunk ndarray failed");
+                    (nom_chunk_bb, chunk_array)
                 };
 
                 let chunk_write_bb = write_bb.clone() - &chunk_bb.offset;
                 let chunk_slice = chunk_write_bb.to_ndarray_slice();
-                let mut chunk_view = unsafe { chunk_array
-                    .slice_mut(SliceInfo::<_, IxDyn, IxDyn>::new(chunk_slice).unwrap().as_ref()) };
+                let mut chunk_view = unsafe {
+                    chunk_array.slice_mut(
+                        SliceInfo::<_, IxDyn, IxDyn>::new(chunk_slice)
+                            .unwrap()
+                            .as_ref(),
+                    )
+                };
 
                 chunk_view.assign(&arr_view);
 
@@ -367,48 +476,49 @@ pub trait ZarrNdarrayWriter: HierarchyWriter {
 impl<T: HierarchyWriter> ZarrNdarrayWriter for T {}
 
 impl ArrayMetadata {
-    pub fn coord_iter(&self) -> impl Iterator<Item = Vec<u64>> + ExactSizeIterator {
-        let coord_ceil = self.get_grid_extent();
+    /// Returns an iterator over the array chunk coordinates.
+    pub fn coord_iter(&self) -> impl ExactSizeIterator<Item = Vec<u64>> {
+        let coord_ceil = self.grid_extent();
         CoordIterator::new(&coord_ceil)
     }
 
+    /// Returns an iterator over the array chunk coordinates that are within the given
+    /// [`BoundingBox`].
     pub fn bounded_coord_iter(
         &self,
         unbounded_bbox: &BoundingBox,
-    ) -> impl Iterator<Item = Vec<u64>> + ExactSizeIterator {
+    ) -> impl ExactSizeIterator<Item = Vec<u64>> {
         let mut bbox = self.get_bounds();
         bbox.intersect(unbounded_bbox);
         let floor_coord: GridCoord = bbox
             .offset
             .iter()
-            .zip(&self.chunk_grid.chunk_shape)
+            .zip(self.chunk_shape())
             .map(|(&o, &cs)| o / u64::from(cs))
             .collect();
         let ceil_coord: GridCoord = bbox
             .offset
             .iter()
             .zip(&bbox.shape)
-            .zip(self.chunk_grid.chunk_shape.iter().cloned().map(u64::from))
+            .zip(self.chunk_shape().iter().copied().map(u64::from))
             .map(|((&o, &s), cs)| (o + s + cs - 1) / cs)
             .collect();
 
         CoordIterator::floor_ceil(&floor_coord, &ceil_coord)
     }
 
+    /// Returns the [`BoundingBox`] for this array's shape.
+    #[must_use]
     pub fn get_bounds(&self) -> BoundingBox {
         BoundingBox {
-            offset: smallvec![0; self.shape.len()],
-            shape: self.shape.clone(),
+            offset: smallvec![0; self.shape().len()],
+            shape: self.shape().into(),
         }
     }
 
+    /// Returns a [`BoundingBox`] of the array indices of the chunk with coordinates `coord`.
     pub fn get_chunk_bounds(&self, coord: &[u64]) -> BoundingBox {
-        let shape: GridCoord = self
-            .get_chunk_shape()
-            .iter()
-            .cloned()
-            .map(u64::from)
-            .collect();
+        let shape: GridCoord = self.chunk_shape().iter().copied().map(u64::from).collect();
         let offset: GridCoord = coord.iter().zip(shape.iter()).map(|(c, s)| c * s).collect();
         // In Zarr there is no need to trim the chunk bounds to be inside the
         // array bounds, as boundary chunks may overhang.
@@ -420,25 +530,36 @@ impl<T: ReflectedType, C: AsRef<[T]>> SliceDataChunk<T, C> {
     /// Get the bounding box of the occupied extent of this chunk.
     /// In Zarr all chunks in an array are the same shape.
     pub fn get_bounds(&self, array_meta: &ArrayMetadata) -> BoundingBox {
-        array_meta.get_chunk_bounds(self.get_grid_position())
+        array_meta.get_chunk_bounds(self.grid_position())
     }
 
-    fn shape_ndarray_shape(&self, array_meta: &ArrayMetadata) -> ndarray::Shape<Dim<IxDynImpl>> {
+    fn shape_ndarray_shape(&self, array_meta: &ArrayMetadata) -> ndarray::Shape<IxDyn> {
         let chunk_bb = self.get_bounds(array_meta);
-        match array_meta.get_chunk_memory_layout() {
+        match array_meta.order() {
             Order::ColumnMajor => chunk_bb.shape_ndarray_shape().f(),
             Order::RowMajor => chunk_bb.shape_ndarray_shape()[..].into_shape(),
         }
     }
 
-    pub fn as_ndarray(&self, array_meta: &ArrayMetadata) -> ArrayView<'_, T, Dim<IxDynImpl>> {
+    /// Returns an immutable [`ArrayView`] of the data backing this [`SliceDataChunk`].
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the underlying data doesn't have the expected shape.
+    pub fn as_ndarray(&self, array_meta: &ArrayMetadata) -> ArrayView<'_, T, IxDyn> {
         let chunk_shape = self.shape_ndarray_shape(array_meta);
-        ArrayView::from_shape(chunk_shape, self.get_data()).expect("TODO: chunk ndarray failed")
+        ArrayView::from_shape(chunk_shape, self.data()).expect("TODO: chunk ndarray failed")
     }
 }
 
 impl<T: ReflectedType> VecDataChunk<T> {
-    pub fn into_ndarray(self, array_meta: &ArrayMetadata) -> Array<T, Dim<IxDynImpl>> {
+    /// Convert this [`SliceDataChunk`] into a [Array].
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the underlying data doesn't have the expected shape.
+    #[must_use]
+    pub fn into_ndarray(self, array_meta: &ArrayMetadata) -> Array<T, IxDyn> {
         let chunk_shape = self.shape_ndarray_shape(array_meta);
         Array::from_shape_vec(chunk_shape, self.into_data()).expect("TODO: chunk ndarray failed")
     }

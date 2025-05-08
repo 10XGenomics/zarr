@@ -1,15 +1,9 @@
-use std::io::{
-    Read,
-    Write,
-};
+use std::io::{Read, Write};
 
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression as GzCompression;
-use serde::{
-    Deserialize,
-    Serialize,
-};
+use serde::{Deserialize, Serialize};
 
 use super::Compression;
 
@@ -92,7 +86,7 @@ mod tests {
         // The compressed stream differs from Java.
         // The difference is one byte: the operating system ID.
         // Java uses 0 (FAT) while flate2 usese 255 (unknown).
-        let mut fudge_test_chunk = TEST_CHUNK_I16_GZIP.clone();
+        let mut fudge_test_chunk = TEST_CHUNK_I16_GZIP;
         fudge_test_chunk[9] = 255;
         crate::tests::test_write_doc_spec_chunk(
             &fudge_test_chunk,
